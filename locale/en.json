@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Notify Sound",
+    "description": "Plays a sound when a turn finishes, is interrupted, errors, or the agent asks a question, with an optional system toast."
+  }
+}

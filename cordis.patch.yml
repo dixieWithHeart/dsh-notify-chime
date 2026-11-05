@@ -1,0 +1,18 @@
+# dsh-notify-chime —— 宿主行
+# 工作完成 / 中断 / 出错 / Agent 提问时发声（提问时另弹系统通知）。
+- insert:
+    - id: dsh-notify-chime
+      name: 'dsh-notify-chime'
+      config:
+        # enabled=false 不再让插件整体不加载：事件照常记录进轨迹，只是不发声，
+        # 这样设置页始终能打开把声音重新打开。
+        enabled: true
+        # 同一类事件的最小间隔（去抖），毫秒
+        minIntervalMs: 700
+        # 是否也为 subagent 子会话发声（默认只提醒你自己的会话）
+        includeSubagents: false
+        # 屏幕提醒：目前只在 Agent 提问时弹系统通知；改成 false 就只响不弹
+        toast:
+          enabled: true
+          kinds: [ question ]
+          includeSession: true

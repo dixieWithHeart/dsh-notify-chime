@@ -1,0 +1,56 @@
+{
+  "name": "dsh-notify-chime",
+  "version": "1.1.1",
+  "type": "module",
+  "description": "Host-side notification plugin: sounds and optional system toasts when a DSH turn finishes, is interrupted, errors, or the agent asks a question.",
+  "main": "lib/host.js",
+  "exports": {
+    ".": "./lib/host.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "assets",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT",
+  "author": "dixie_2003 (https://github.com/dixieWithHeart)",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "notification",
+    "sound",
+    "toast"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dixieWithHeart/dsh-notify-chime.git"
+  },
+  "homepage": "https://github.com/dixieWithHeart/dsh-notify-chime",
+  "bugs": {
+    "url": "https://github.com/dixieWithHeart/dsh-notify-chime/issues"
+  }
+}
