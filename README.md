@@ -1,10 +1,9 @@
-# dsh-notify-chime
+# dsh-notify-chime（提示音）
 
 给 DeepSeek Harness 加「听得见」的提醒：**工作完成 / 工作中断 / 出错 / Agent 提问** 时播放音效，
 需要视觉提醒时还可以弹出 Windows 系统通知（Toast）。
 
-插件跑在 Host 进程里，属于纯本地插件：只依赖 Node 内置模块，可以在配置里用绝对路径直接插入，
-不需要 npm 安装、不需要构建步骤。
+插件跑在 Host 进程里，**零依赖**（只用 Node 内置模块）、无构建步骤，装完即可用。
 
 ---
 

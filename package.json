@@ -2,7 +2,7 @@
   "name": "dsh-notify-chime",
   "version": "1.1.1",
   "type": "module",
-  "description": "Host-side notification plugin: sounds and optional system toasts when a DSH turn finishes, is interrupted, errors, or the agent asks a question.",
+  "description": "工作完成、中断、出错或 Agent 提问时播放提示音，提问时可另弹 Windows 系统通知。",
   "main": "lib/host.js",
   "exports": {
     ".": "./lib/host.js",
