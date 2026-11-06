@@ -1,8 +1,8 @@
 {
   "name": "dsh-notify-chime",
-  "version": "1.4.0",
+  "version": "1.7.0",
   "type": "module",
-  "description": "回合完成、中断、出错或 Agent 提问时发声，可另弹系统通知；六套音色，支持自定义 WAV。",
+  "description": "回合完成、中断、出错、审批或提问时发声，可另弹系统通知；六套音色，自定义音效支持 WAV / MP3 / M4A。",
   "main": "lib/host.js",
   "exports": {
     ".": "./lib/host.js",

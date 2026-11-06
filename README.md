@@ -7,7 +7,13 @@
 | 回合正常结束 | `finished` | 上行三音 |
 | 中断（停止、归档、取消） | `interrupted` | 下行两音 |
 | 出错结束 | `error` | 低频双响 |
-| Agent 提问（等回答 / 等批计划） | `question` | 三声高音 |
+| Agent 提问（等回答） | `question` | 三声高音 |
+| 等待审批（`approval/asked`） | `approval` | 上行双音，稍急 |
+| 计划评审（`exit_plan_mode`） | `plan-review` | 三音上行 |
+| 目标受阻（`goal/change` → `phase: blocked`） | `goal-blocked` | 低频下行 |
+| 后台任务失败（`job/settled` → `failed`） | `job-failed` | 短促双音 |
+
+计划评审以前混在「提问」里，1.5.0 起单独分类。目标受阻只在「非 blocked → blocked」那一次跃迁发声；后台任务失败按会话 3 秒窗口去抖，多个任务同时失败只响一次。
 
 应用退出、会话分叉、被阻断，以及默认被过滤的 subagent 会话不发声。
 
@@ -25,7 +31,7 @@ dsh plugin add dsh-notify-chime
 
 | 组 | 内容 |
 | --- | --- |
-| 声音 | 总开关、音色、四类事件各自开关与试听、最小间隔、子会话提醒 |
+| 声音 | 总开关、音色、八类事件各自开关与试听、正在看的会话完成时不响、同类事件最小间隔、子会话提醒 |
 | 通知 | 通知总开关、哪些事件弹、标题前缀、正文是否带会话名 |
 | 高级 | 设置文件 / 音效 / 自定义 / 轨迹目录（只读）、恢复默认 |
 
@@ -54,7 +60,7 @@ dsh plugin add dsh-notify-chime
 
 音色为「自定义」的行会出现「上传」按钮：
 
-- 只收 WAV（`System.Media.SoundPlayer` 的限制），单文件 ≤ 5 MB
+- 支持 **WAV / MP3 / M4A / AAC**，单文件 ≤ 5 MB；WAV 走 `SoundPlayer`，其它走 WPF `MediaPlayer`（借系统解码器）
 - 存 `~/.dsh/dsh-notify-chime-sounds/<kind>.wav`，卸载插件不丢
 - 上传后该行切到「自定义」，其它事件的音色不变；没传的类仍用内置音效
 - 上传即生效，可直接点「试听」确认
@@ -70,7 +76,15 @@ dsh plugin add dsh-notify-chime
     soundset: default
     minIntervalMs: 700
     includeSubagents: false
-    kinds: { finished: true, interrupted: true, error: true, question: true }
+    kinds:
+      finished: true
+      interrupted: true
+      error: true
+      question: true
+      approval: true
+      plan-review: true
+      goal-blocked: true
+      job-failed: true
     toast: { enabled: true, kinds: [question], includeSession: true }
 ```
 
@@ -80,10 +94,11 @@ dsh plugin add dsh-notify-chime
 | `soundset` | `default` | 全局音色：`default` / `soft` / `chime` / `retro` / `digital` / `wood` / `custom` |
 | `minIntervalMs` | `700` | 同类事件最小间隔，防连响 |
 | `includeSubagents` | `false` | 是否也为子会话发声 |
+| `quietCurrent` | `false` | 正在查看的那个会话完成时不发声（只影响完成，审批/提问/出错照响） |
 | `kinds.<kind>` | `true` | 该类事件是否发声 |
 | `sounds.<kind>` | 内置 wav | 单类音效路径；`false` 或 `null` 表示不响 |
-| `player` | `auto` | `auto` / `powershell` / `pwsh` / `none` / 播放器路径 |
-| `questionTools` | `["ask_user_question", "exit_plan_mode"]` | 视为提问的工具名 |
+| `player` | `auto` | `auto` / `powershell` / `pwsh` / `wpf` / `none` / 播放器路径。`auto` 时 wav 用 `SoundPlayer`、其它格式用 WPF `MediaPlayer` |
+| `questionTools` | `["ask_user_question"]` | 只决定谁触发 `question` 音。`exit_plan_mode` 固定归 `plan-review`，想静音它请关 `kinds.plan-review` |
 | `toast.enabled` | `false` | 是否弹系统通知（本包初值为 `true`） |
 | `toast.kinds` | `null` | 只对哪些 kind 弹，`null` 为全部 |
 | `toast.title` | `DeepSeek Harness` | 通知标题前缀，最长 60 字符 |
@@ -140,7 +155,7 @@ node tools/smoke-test.mjs --verbose
 - 监听会话日志的追加流，冷启动打开历史会话不补响。
 - 每次提醒 spawn 独立子进程播放，不阻塞 Host。PowerShell 冷启动约 200 ms，延迟约 0.3 s。
 - 无音量调节，跟随系统默认播放设备；默认设备是虚拟声卡时人耳可能听不到。
-- 自定义音效只支持 WAV，不支持 mp3 / flac。
+- 自定义音效支持 WAV / MP3 / M4A / AAC；WMA、FLAC 不支持（系统虽有解码器，但没有接）。
 - 目录：`lib/`（宿主）、`client.js`（设置页）、`assets/`（音效）、`tools/`（脚本）。
 
 ## 音效来源

@@ -32,6 +32,10 @@ window.__ModuleLoader__.load({
       { key: 'interrupted', label: '工作中断', sound: null, soundExists: true },
       { key: 'error', label: '工作出错', sound: null, soundExists: true },
       { key: 'question', label: 'Agent 提问', sound: null, soundExists: true },
+      { key: 'approval', label: '等待审批', sound: null, soundExists: true },
+      { key: 'plan-review', label: '计划评审', sound: null, soundExists: true },
+      { key: 'goal-blocked', label: '目标受阻', sound: null, soundExists: true },
+      { key: 'job-failed', label: '后台任务失败', sound: null, soundExists: true },
     ]
 
     /** 宿主没返回音色套清单时的兜底。 */
@@ -48,6 +52,7 @@ window.__ModuleLoader__.load({
     const EMPTY_SETTINGS = {
       enabled: true,
       soundset: 'default',
+      quietCurrent: false,
       perKindSoundset: {},
       customSounds: {},
       kinds: { finished: true, interrupted: true, error: true, question: true },
@@ -73,10 +78,27 @@ window.__ModuleLoader__.load({
     }
     const listeners = new Set()
     const emit = () => { for (const fn of listeners) fn(state) }
+    /** apply 时保存的客户端上下文，供 refresh 读取「当前会话」。 */
+    let pluginCtx = null
+
+    /** 读客户端当前打开的会话 id；拿不到就返回 null（该功能温和失效，不影响其它能力）。 */
+    function currentSessionId () {
+      try {
+        const sessions = pluginCtx && typeof pluginCtx.get === 'function' ? pluginCtx.get('sessions') : undefined
+        const list = sessions && sessions.list
+        const snap = list && typeof list.getSnapshot === 'function' ? list.getSnapshot() : undefined
+        const id = snap ? snap.current : undefined
+        return typeof id === 'string' && id.length > 0 ? id : null
+      } catch {
+        return null
+      }
+    }
 
     async function refresh () {
       try {
-        const r = await fetch(API + '/state', { headers: { accept: 'application/json' } })
+        const current = currentSessionId()
+        const url = API + '/state' + (current ? '?current=' + encodeURIComponent(current) : '')
+        const r = await fetch(url, { headers: { accept: 'application/json' } })
         if (!r.ok) throw new Error('HTTP ' + r.status)
         const j = await r.json()
         state = { ...state, loading: false, error: null, ...j }
@@ -152,8 +174,9 @@ window.__ModuleLoader__.load({
       sectionHint: { fontSize: '12px', color: C.dim, flex: 1, minWidth: 0 },
       chevron: { fontSize: '11px', color: C.dim, marginLeft: 'auto', flex: 'none' },
       sectionBody: { padding: '12px 14px', display: 'grid', gap: '12px' },
-      row: { display: 'flex', alignItems: 'flex-start', gap: '12px' },
-      rowText: { display: 'grid', gap: '2px', flex: 1, minWidth: 0 },
+      // 行布局自适应：空间不够时控件整体换到下一行，而不是把标题挤成一字一列
+      row: { display: 'flex', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' },
+      rowText: { display: 'grid', gap: '2px', flex: '1 1 200px', minWidth: '180px' },
       rowTitle: { fontSize: '13px', fontWeight: 550 },
       rowDesc: { fontSize: '12px', color: C.dim, lineHeight: 1.5 },
       toggle: (on) => ({
@@ -165,13 +188,13 @@ window.__ModuleLoader__.load({
         position: 'absolute', top: '2px', left: on ? '18px' : '2px', width: '16px', height: '16px',
         borderRadius: '50%', background: '#fff', transition: 'left 160ms ease',
       }),
-      inline: { display: 'flex', alignItems: 'center', gap: '8px', flex: 'none' },
+      inline: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 1 auto', flexWrap: 'wrap', justifyContent: 'flex-end' },
       input: {
         width: '110px', padding: '5px 8px', fontSize: '13px', textAlign: 'right',
         border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
       },
       inputWide: {
-        flex: 1, minWidth: 0, padding: '5px 8px', fontSize: '13px',
+        flex: '1 1 160px', minWidth: '160px', padding: '5px 8px', fontSize: '13px',
         border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
       },
       btn: (disabled) => ({
@@ -179,7 +202,9 @@ window.__ModuleLoader__.load({
         border: '1px solid ' + C.border, background: 'transparent', color: C.text,
         cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flex: 'none',
       }),
-      chips: { display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 'none' },
+      chips: { display: 'flex', gap: '6px', flexWrap: 'wrap', minWidth: 0 },
+      /** 行内 chips：允许收缩换行，右对齐 */
+      chipsRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', flex: '0 1 auto', minWidth: 0, maxWidth: '100%', justifyContent: 'flex-end' },
       fileBtn: {
         padding: '5px 10px', fontSize: '12px', borderRadius: C.radiusSm, border: '1px dashed ' + C.border,
         color: C.dim, cursor: 'pointer', flex: 'none', whiteSpace: 'nowrap',
@@ -414,7 +439,7 @@ window.__ModuleLoader__.load({
                 uploading === meta.key ? '上传中' : (customSounds[meta.key] ? '重新上传' : '上传'),
                 h('input', {
                   type: 'file',
-                  accept: '.wav,audio/wav',
+                  accept: '.wav,.mp3,.m4a,.aac',
                   style: S.fileInput,
                   onChange: (e) => upload(e, meta),
                 }))
@@ -430,7 +455,7 @@ window.__ModuleLoader__.load({
       ))
 
       /** 音色套选择：选中即写设置，试听按钮随即用新音色。 */
-      const soundsetChips = h('div', { style: S.chips }, soundsets.map((set) => {
+      const soundsetChips = h('div', { style: S.chipsRow }, soundsets.map((set) => {
         const on = soundset === set.key
         return h('button', {
           type: 'button',
@@ -441,7 +466,7 @@ window.__ModuleLoader__.load({
         }, set.label)
       }))
 
-      const toastChips = h('div', { style: S.chips }, kindMeta.map((meta) => {
+      const toastChips = h('div', { style: S.chipsRow }, kindMeta.map((meta) => {
         const on = toastKinds.includes(meta.key)
         return h('button', {
           type: 'button',
@@ -509,6 +534,16 @@ window.__ModuleLoader__.load({
                 },
               }, '保存'),
             ),
+          }),
+          rowNode({
+            key: 'quietCurrent',
+            title: '正在看的会话完成时不响',
+            desc: '只对「工作完成」生效；审批、提问、出错照常响。默认关闭。',
+            control: toggleNode({
+              on: settings.quietCurrent === true,
+              label: '正在看的会话完成时不响',
+              onChange: (v) => commit({ quietCurrent: v }, v ? '正在看的会话完成时不再响' : '完成时照常响'),
+            }),
           }),
           rowNode({
             key: 'subagents',
@@ -642,6 +677,7 @@ window.__ModuleLoader__.load({
     const inject = ['slots']
 
     function apply (ctx) {
+      pluginCtx = ctx
       ctx.effect(() => {
         refresh()
         const timer = setInterval(() => { if (!document.hidden) refresh() }, POLL_MS)

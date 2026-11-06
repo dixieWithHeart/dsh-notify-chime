@@ -74,10 +74,11 @@ const clearTrace = () => writeFileSync(traceFile, '')
 
 /** 调一个宿主路由，返回 { status, body }。payload 可以是对象或 Buffer，headers 模拟请求头。 */
 const call = async (path, method = 'GET', payload, headers = {}) => {
-  const handler = routes.get(path)
+  const handler = routes.get(String(path).split('?')[0])
   if (!handler) throw new Error(`路由未注册：${path}`)
   const req = {
     method,
+    url: path,
     headers,
     async *[Symbol.asyncIterator] () {
       if (payload === undefined) return
@@ -147,7 +148,7 @@ await call('/api/dsh-notify-chime/set', 'POST', { minIntervalMs: 0 })
 const stateRes = await call('/api/dsh-notify-chime/state')
 check('/state 返回 200', stateRes.status === 200, String(stateRes.status))
 check('/state 带 version', typeof stateRes.body?.version === 'string', String(stateRes.body?.version))
-check('/state 带四类事件元数据', Array.isArray(stateRes.body?.kinds) && stateRes.body.kinds.length === 4, JSON.stringify(stateRes.body?.kinds?.map((k) => k.key)))
+check('/state 带八类事件元数据', Array.isArray(stateRes.body?.kinds) && stateRes.body.kinds.length === 8, JSON.stringify(stateRes.body?.kinds?.map((k) => k.key)))
 check('/state 带设置文件路径', typeof stateRes.body?.settingsFile === 'string' && stateRes.body.settingsFile.endsWith('dsh-notify-chime.json'), String(stateRes.body?.settingsFile))
 check('/state 的 settings 无旧字段', stateRes.body?.settings?.muted === undefined && stateRes.body?.settings?.toastEnabled === undefined, JSON.stringify(stateRes.body?.settings))
 
@@ -242,6 +243,36 @@ check('未上传的事件回退内置音效',
   typeof customOther?.sound === 'string' && !customOther.sound.includes('dsh-notify-chime-sounds'),
   String(customOther?.sound))
 
+// ── 11.1 多格式（MP3 / M4A）与换格式清理 ───────────────────────────────
+const soundsPath = join(home, 'dsh-notify-chime-sounds')
+const mp3Bytes = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(20), Buffer.alloc(64)])
+const m4aBytes = Buffer.concat([Buffer.alloc(4), Buffer.from('ftypM4A '), Buffer.alloc(64)])
+
+const mp3Upload = await call('/api/dsh-notify-chime/sound', 'POST', mp3Bytes, { 'x-chime-kind': 'error' })
+check('MP3 上传返回 200', mp3Upload.status === 200, JSON.stringify(mp3Upload.body))
+check('MP3 存成 .mp3', String(mp3Upload.body?.sound).endsWith('.mp3'), String(mp3Upload.body?.sound))
+
+const m4aUpload = await call('/api/dsh-notify-chime/sound', 'POST', m4aBytes, { 'x-chime-kind': 'question' })
+check('M4A 上传返回 200', m4aUpload.status === 200, JSON.stringify(m4aUpload.body))
+check('M4A 存成 .m4a', String(m4aUpload.body?.sound).endsWith('.m4a'), String(m4aUpload.body?.sound))
+
+const wavThenMp3 = await call('/api/dsh-notify-chime/sound', 'POST', wavBytes, { 'x-chime-kind': 'interrupted' })
+const beforeSwitch = existsSync(join(soundsPath, 'interrupted.wav'))
+await call('/api/dsh-notify-chime/sound', 'POST', mp3Bytes, { 'x-chime-kind': 'interrupted' })
+check('换格式后旧的 .wav 被清掉', beforeSwitch && !existsSync(join(soundsPath, 'interrupted.wav')), String(beforeSwitch))
+check('换格式后新的 .mp3 在位', existsSync(join(soundsPath, 'interrupted.mp3')), '')
+
+const unknownUpload = await call('/api/dsh-notify-chime/sound', 'POST', Buffer.from('xxxxxxxxxxxxxxxx'), { 'x-chime-kind': 'approval' })
+check('无法识别的格式返回 400', unknownUpload.status === 400, JSON.stringify(unknownUpload.body))
+
+// 体积边界
+const huge = Buffer.alloc(5 * 1024 * 1024 + 16)
+huge.write('RIFF', 0); huge.write('WAVE', 8)
+const hugeUpload = await call('/api/dsh-notify-chime/sound', 'POST', huge, { 'x-chime-kind': 'approval' })
+check('音频超过 5 MB 返回 413', hugeUpload.status === 413, String(hugeUpload.status))
+const hugeBody = await call('/api/dsh-notify-chime/set', 'POST', { toast: { title: 'x'.repeat(20000) } })
+check('设置请求体超限返回 413', hugeBody.status === 413, String(hugeBody.status))
+
 // ── 12. patch 层 fail-loud 校验 ────────────────────────────────────────
 const expectThrow = (label, config) => {
   let threw = null
@@ -251,6 +282,118 @@ const expectThrow = (label, config) => {
 expectThrow('patch 非法 soundset 报错', { player: 'none', soundset: 'nope' })
 expectThrow('patch 未知字段报错', { player: 'none', nope: 1 })
 expectThrow('patch 非法 kinds 键报错', { player: 'none', kinds: { nope: true } })
+
+// ── 13. 异常隔离：插件不能成为宿主的卡死来源 ──────────────────────────
+// 事件字段在宿主版本变化后可能变成会抛错的 getter，这里直接注入一个。
+const trapEvent = {
+  type: 'turn/end',
+  get data () { throw new Error('boom: data getter') },
+}
+let listenerThrew = null
+try {
+  for (const listener of listeners.get('session/event') ?? []) listener({ id: 's', header: {} }, trapEvent)
+} catch (error) { listenerThrew = error }
+check('事件处理抛错被吞掉，不冒泡到宿主', listenerThrew === null, listenerThrew ? listenerThrew.message : '')
+
+// 请求流本身抛错时，路由必须给出响应而不是挂起连接
+const brokenReq = {
+  method: 'POST',
+  headers: {},
+  async *[Symbol.asyncIterator] () { throw new Error('stream boom') },
+}
+const brokenRes = {
+  statusCode: 0,
+  payload: '',
+  headersSent: false,
+  writeHead (status) { this.statusCode = status; this.headersSent = true },
+  end (text) { this.payload = text ?? '' },
+}
+let routeThrew = null
+try {
+  await routes.get('/api/dsh-notify-chime/set')(brokenReq, brokenRes)
+} catch (error) { routeThrew = error }
+check('路由内部抛错被吞掉', routeThrew === null, routeThrew ? routeThrew.message : '')
+check('路由抛错时返回 500', brokenRes.statusCode === 500, String(brokenRes.statusCode))
+const afterAbuse = await call('/api/dsh-notify-chime/state')
+check('异常之后路由仍然可用', afterAbuse.status === 200, String(afterAbuse.status))
+
+// ── 14. 新增事件分类（审批 / 评审 / 目标受阻 / 后台任务失败）────────────
+clearTrace()
+emit({ type: 'approval/asked', data: { id: 'a1', toolName: 'exec_command' } })
+let run = readTrace().filter((e) => e.kind === 'approval')
+check('approval/asked → approval', run.length === 1 && run[0].skipped === undefined, JSON.stringify(run))
+check('审批轨迹带工具名', run[0]?.tool === 'exec_command', String(run[0]?.tool))
+
+clearTrace()
+emit({ type: 'tool/call', data: { name: 'exit_plan_mode' } })
+run = readTrace().filter((e) => e.kind === 'plan-review')
+check('exit_plan_mode → plan-review', run.length === 1, JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'tool/call', data: { name: 'ask_user_question' } })
+run = readTrace().filter((e) => e.kind === 'question')
+check('ask_user_question 仍归入 question', run.length === 1, JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'block', goal: { phase: 'blocked' } } })
+emit({ type: 'goal/change', data: { kind: 'goal/change', version: 1, operation: 'block', goal: { phase: 'blocked' } } })
+run = readTrace().filter((e) => e.kind === 'goal-blocked')
+check('目标受阻只响一次（重复 blocked 不再触发）', run.length === 1, JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'goal/change', data: { goal: { phase: 'active' } } })
+check('目标非 blocked 不响', readTrace().length === 0, JSON.stringify(readTrace()))
+
+clearTrace()
+emit({ type: 'job/settled', data: { status: 'completed' } })
+emit({ type: 'job/settled', data: { status: 'killed' } })
+check('后台任务完成/终止不响', readTrace().length === 0, JSON.stringify(readTrace()))
+
+clearTrace()
+emit({ type: 'job/settled', data: { status: 'failed', detail: 'exit 1' } })
+emit({ type: 'job/settled', data: { status: 'failed', detail: 'exit 2' } })
+run = readTrace()
+check('后台任务失败响一次', run.filter((e) => e.kind === 'job-failed' && e.skipped === undefined).length === 1, JSON.stringify(run))
+check('同会话第二次失败被 3 秒窗口压住', run.some((e) => e.skipped === 'job-window'), JSON.stringify(run))
+
+// 先把该会话的目标状态稳定在 blocked，再测「清除后重新受阻」
+emit({ type: 'goal/change', data: { goal: { phase: 'blocked' } } })
+emit({ type: 'goal/change', data: { goal: { phase: 'blocked' } } })
+clearTrace()
+emit({ type: 'goal/change', data: { operation: 'clear' } })           // 清除目标
+emit({ type: 'goal/change', data: { goal: { phase: 'blocked' } } })   // 重新受阻应再响
+run = readTrace().filter((e) => e.kind === 'goal-blocked')
+check('目标清除后重新受阻仍发声', run.length === 1, JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'approval/asked' })
+emit({ type: 'goal/change', data: {} })
+emit({ type: 'job/settled', data: {} })
+check('新事件缺字段时静默跳过', readTrace().length === 0, JSON.stringify(readTrace()))
+
+// ── 15. 「当前正在看的会话完成时不响」────────────────────────────────
+await call('/api/dsh-notify-chime/set', 'POST', { quietCurrent: true })
+const reported = await call('/api/dsh-notify-chime/state?current=session-test')
+check('带 current 查询的 /state 正常', reported.status === 200, String(reported.status))
+
+clearTrace()
+turnEnd({ kind: 'completed' })
+run = readTrace().filter((e) => e.kind === 'finished')
+check('正在看的会话完成时被跳过', run.some((e) => e.skipped === 'quiet-current'), JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }, { id: 'other-session', header: {} })
+run = readTrace().filter((e) => e.kind === 'finished')
+check('其它会话完成照常发声', run.some((e) => e.skipped === undefined), JSON.stringify(run))
+
+clearTrace()
+emit({ type: 'tool/call', data: { name: 'ask_user_question' } })
+check('正在看的会话里提问照常发声', readTrace().some((e) => e.kind === 'question' && e.skipped === undefined), JSON.stringify(readTrace()))
+
+await call('/api/dsh-notify-chime/set', 'POST', { quietCurrent: false })
+clearTrace()
+turnEnd({ kind: 'completed' })
+check('关闭后完成事件恢复发声', readTrace().some((e) => e.kind === 'finished' && e.skipped === undefined), JSON.stringify(readTrace()))
 
 // ── 收尾 ───────────────────────────────────────────────────────────────
 rmSync(home, { recursive: true, force: true })
