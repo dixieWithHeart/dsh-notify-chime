@@ -1,12 +1,19 @@
 // dsh-notify-chime — 浏览器半 / browser half
 //
-// 注册一个设置页（settings.section）：静音开关、最小间隔、子会话提醒、提问弹通知。
+// 注册一个设置页（settings.section），三组折叠分区：
+//   声音 —— 总开关、四类事件各自开关与试听、最小间隔、子会话
+//   通知 —— 通知总开关、哪些事件弹、标题前缀、是否带会话名
+//   高级 —— 只读路径与 patch 初值、恢复默认
 // 所有写入走宿主路由 /api/dsh-notify-chime/*，改完立即生效（不需要重启）。
 //
 // 契约：
 //   window.__ModuleLoader__.load({ id, factory(require) }) —— id 必须是包名
 //   不 require 任何 @deepseek-ai/dsh-client-* 包；React 从 browser module table 取
 //   样式只用 --dsw-alias-* 主题 token，且都带 fallback
+//
+// 实现取舍：除了顶层 SettingsCard，页面里的分区、行、开关都用普通函数拼元素，
+// 不用自定义组件——渲染测试（tools/test-client-render.mjs）只执行顶层函数体，
+// 子组件里的样式引用漏定义在测试里看不见，真实浏览器会整页空白（踩坑第 15 条）。
 
 window.__ModuleLoader__.load({
   id: 'dsh-notify-chime',
@@ -19,15 +26,50 @@ window.__ModuleLoader__.load({
     const POLL_MS = 3000
     const LOG = '[dsh-notify-chime]'
 
+    /** 宿主没返回元数据时的兜底（字段缺失也要能渲染）。 */
+    const KIND_FALLBACK = [
+      { key: 'finished', label: '工作完成', sound: null, soundExists: true },
+      { key: 'interrupted', label: '工作中断', sound: null, soundExists: true },
+      { key: 'error', label: '工作出错', sound: null, soundExists: true },
+      { key: 'question', label: 'Agent 提问', sound: null, soundExists: true },
+    ]
+
+    /** 宿主没返回音色套清单时的兜底。 */
+    const SOUNDSET_FALLBACK = [
+      { key: 'default', label: '默认' },
+      { key: 'soft', label: '柔和' },
+      { key: 'chime', label: '钟声' },
+      { key: 'retro', label: '复古' },
+      { key: 'digital', label: '电子' },
+      { key: 'wood', label: '木质' },
+      { key: 'custom', label: '自定义' },
+    ]
+
+    const EMPTY_SETTINGS = {
+      enabled: true,
+      soundset: 'default',
+      perKindSoundset: {},
+      customSounds: {},
+      kinds: { finished: true, interrupted: true, error: true, question: true },
+      minIntervalMs: 700,
+      includeSubagents: false,
+      toast: { enabled: false, kinds: ['question'], title: 'DeepSeek Harness', includeSession: true },
+    }
+
     let state = {
       loading: true,
       error: null,
       version: '',
       enabledByPatch: true,
-      settings: { muted: false, minIntervalMs: 700, includeSubagents: false, toastEnabled: true },
+      settings: EMPTY_SETTINGS,
+      kinds: KIND_FALLBACK,
+      soundsets: SOUNDSET_FALLBACK,
+      customSounds: {},
+      soundsDir: '',
       traceFile: null,
-      sounds: {},
+      settingsFile: '',
       questionTools: [],
+      toastAppId: '',
     }
     const listeners = new Set()
     const emit = () => { for (const fn of listeners) fn(state) }
@@ -53,8 +95,22 @@ window.__ModuleLoader__.load({
       let j = null
       try { j = await r.json() } catch { /* 非 JSON 响应按失败处理 */ }
       if (!r.ok || !j || j.ok === false) throw new Error((j && j.error) || ('HTTP ' + r.status))
-      state = { ...state, settings: j.settings, error: null }
+      state = { ...state, settings: j.settings || state.settings, error: null }
       emit()
+      // 设置变了，各事件生效的音色与文件路径（kind 元数据）也要立刻跟上，不等下一轮询
+      await refresh()
+      return j
+    }
+
+    async function playPreview (kind) {
+      const r = await fetch(API + '/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind }),
+      })
+      let j = null
+      try { j = await r.json() } catch { /* 非 JSON 响应按失败处理 */ }
+      if (!r.ok || !j || j.ok === false) throw new Error((j && j.error) || ('HTTP ' + r.status))
       return j
     }
 
@@ -74,6 +130,7 @@ window.__ModuleLoader__.load({
       dim: 'var(--dsw-alias-text-secondary, rgba(140,140,150,1))',
       accent: 'var(--dsw-alias-accent, #4f7cff)',
       surface: 'var(--dsw-alias-surface-raised, rgba(130,130,140,0.06))',
+      danger: 'var(--dsw-alias-danger, #e5534b)',
       radius: 'var(--dsw-radius-lg, 12px)',
       radiusSm: 'var(--dsw-radius-sm, 8px)',
     }
@@ -85,10 +142,17 @@ window.__ModuleLoader__.load({
       badge: { fontSize: '12px', color: C.dim, border: '1px solid ' + C.border, borderRadius: '999px', padding: '1px 8px' },
       status: { marginLeft: 'auto', fontSize: '12px', color: C.dim },
       desc: { margin: 0, fontSize: '13px', lineHeight: 1.6, color: C.dim },
-      panel: { background: C.surface, borderRadius: C.radiusSm, padding: '12px 14px', display: 'grid', gap: '8px' },
-      kv: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: '12px', color: C.dim },
-      mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', wordBreak: 'break-all' },
-      row: { display: 'flex', alignItems: 'flex-start', gap: '12px', paddingTop: '4px' },
+      section: { border: '1px solid ' + C.border, borderRadius: C.radiusSm, overflow: 'hidden' },
+      sectionHead: {
+        width: '100%', display: 'flex', alignItems: 'baseline', gap: '8px', padding: '9px 12px',
+        background: C.surface, border: 'none', color: C.text, cursor: 'pointer', textAlign: 'left',
+        font: 'inherit',
+      },
+      sectionTitle: { fontSize: '13px', fontWeight: 600 },
+      sectionHint: { fontSize: '12px', color: C.dim, flex: 1, minWidth: 0 },
+      chevron: { fontSize: '11px', color: C.dim, marginLeft: 'auto', flex: 'none' },
+      sectionBody: { padding: '12px 14px', display: 'grid', gap: '12px' },
+      row: { display: 'flex', alignItems: 'flex-start', gap: '12px' },
       rowText: { display: 'grid', gap: '2px', flex: 1, minWidth: 0 },
       rowTitle: { fontSize: '13px', fontWeight: 550 },
       rowDesc: { fontSize: '12px', color: C.dim, lineHeight: 1.5 },
@@ -101,76 +165,295 @@ window.__ModuleLoader__.load({
         position: 'absolute', top: '2px', left: on ? '18px' : '2px', width: '16px', height: '16px',
         borderRadius: '50%', background: '#fff', transition: 'left 160ms ease',
       }),
+      inline: { display: 'flex', alignItems: 'center', gap: '8px', flex: 'none' },
       input: {
         width: '110px', padding: '5px 8px', fontSize: '13px', textAlign: 'right',
+        border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
+      },
+      inputWide: {
+        flex: 1, minWidth: 0, padding: '5px 8px', fontSize: '13px',
         border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
       },
       btn: (disabled) => ({
         padding: '5px 12px', fontSize: '13px', borderRadius: C.radiusSm,
         border: '1px solid ' + C.border, background: 'transparent', color: C.text,
-        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flex: 'none',
       }),
-      msg: (bad) => ({ fontSize: '12px', color: bad ? 'var(--dsw-alias-danger, #e5534b)' : C.dim }),
+      chips: { display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 'none' },
+      fileBtn: {
+        padding: '5px 10px', fontSize: '12px', borderRadius: C.radiusSm, border: '1px dashed ' + C.border,
+        color: C.dim, cursor: 'pointer', flex: 'none', whiteSpace: 'nowrap',
+      },
+      fileInput: { display: 'none' },
+      pickerBtn: (on) => ({
+        padding: '4px 9px', fontSize: '12px', borderRadius: C.radiusSm,
+        border: '1px solid ' + (on ? C.accent : C.border),
+        background: 'transparent', color: on ? C.accent : C.dim,
+        cursor: 'pointer', flex: 'none', whiteSpace: 'nowrap',
+      }),
+      kindBlock: { display: 'grid', gap: '6px' },
+      panelTitle: { fontSize: '12px', color: C.dim },
+      chip: (on) => ({
+        padding: '3px 10px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
+        border: '1px solid ' + (on ? C.accent : C.border),
+        background: on ? C.accent : 'transparent',
+        color: on ? '#fff' : C.dim,
+      }),
+      panel: { background: C.surface, borderRadius: C.radiusSm, padding: '12px 14px', display: 'grid', gap: '8px' },
+      kv: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: '12px', color: C.dim },
+      mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', wordBreak: 'break-all' },
+      msg: (bad) => ({ fontSize: '12px', color: bad ? C.danger : C.dim }),
       foot: { fontSize: '12px', color: C.dim, lineHeight: 1.6, margin: 0 },
+      warn: { fontSize: '12px', color: C.danger },
     }
 
-    function Toggle ({ on, onChange, label }) {
-      return h('button', {
-        type: 'button',
-        'aria-label': label,
-        'aria-pressed': on ? 'true' : 'false',
-        style: S.toggle(on),
-        onClick: () => onChange(!on),
-      }, h('span', { style: S.knob(on) }))
-    }
+    /** 开关按钮（普通函数，非组件：保证渲染测试能执行到 S.xxx）。 */
+    const toggleNode = ({ on, onChange, label }) => h('button', {
+      type: 'button',
+      'aria-label': label,
+      'aria-pressed': on ? 'true' : 'false',
+      style: S.toggle(on),
+      onClick: () => onChange(!on),
+    }, h('span', { style: S.knob(on) }))
 
-    function Row ({ title, desc, control }) {
-      return h('div', { style: S.row },
-        h('div', { style: S.rowText },
-          h('div', { style: S.rowTitle }, title),
-          desc ? h('div', { style: S.rowDesc }, desc) : null,
-        ),
-        control,
-      )
-    }
+    /** 一行设置：左标题与说明，右控件。 */
+    const rowNode = ({ title, desc, control }) => h('div', { style: S.row },
+      h('div', { style: S.rowText },
+        h('div', { style: S.rowTitle }, title),
+        desc ? h('div', { style: S.rowDesc }, desc) : null,
+      ),
+      control,
+    )
 
     function SettingsCard () {
       const s = useStore()
       const [busy, setBusy] = useState(false)
-      const [interval, setIntervalText] = useState(String(s.settings.minIntervalMs))
-      const [dirty, setDirty] = useState(false)
+      // 试听 / 上传各自独立：共用一个 busy 会让别的行的按钮一起变灰（看起来像被点了）
+      const [previewing, setPreviewing] = useState(null)
+      const [uploading, setUploading] = useState(null)
+      const [openPanel, setOpenPanel] = useState(null)
       const [msg, setMsg] = useState(null)
-      const serverInterval = useRef(s.settings.minIntervalMs)
+      const [openSound, setOpenSound] = useState(true)
+      const [openToast, setOpenToast] = useState(true)
+      const [openAdvanced, setOpenAdvanced] = useState(false)
+      const [confirmReset, setConfirmReset] = useState(false)
 
+      // 兜底：宿主载荷缺字段时也不能让整页空白（踩坑第 15 条）
+      const settings = s.settings || EMPTY_SETTINGS
+      const toast = settings.toast || EMPTY_SETTINGS.toast
+      const kindMap = settings.kinds || {}
+      const toastKinds = Array.isArray(toast.kinds) ? toast.kinds : []
+      const kindMeta = (Array.isArray(s.kinds) && s.kinds.length > 0) ? s.kinds : KIND_FALLBACK
+      const soundsets = (Array.isArray(s.soundsets) && s.soundsets.length > 0) ? s.soundsets : SOUNDSET_FALLBACK
+      const soundset = typeof settings.soundset === 'string' ? settings.soundset : 'default'
+      const customSounds = settings.customSounds || {}
+
+      const [interval, setIntervalText] = useState(String(settings.minIntervalMs))
+      const [intervalDirty, setIntervalDirty] = useState(false)
+      const [titleText, setTitleText] = useState(String(toast.title || ''))
+      const [titleDirty, setTitleDirty] = useState(false)
+      // 宿主值变了（恢复默认、别处改过）就同步输入框；用户正在编辑时不覆盖
       useEffect(() => {
-        if (s.settings.minIntervalMs !== serverInterval.current) {
-          serverInterval.current = s.settings.minIntervalMs
-          if (!dirty) setIntervalText(String(s.settings.minIntervalMs))
-        }
-      }, [s.settings.minIntervalMs, dirty])
+        if (!intervalDirty) setIntervalText(String(settings.minIntervalMs))
+      }, [settings.minIntervalMs, intervalDirty])
+      useEffect(() => {
+        if (!titleDirty) setTitleText(String(toast.title || ''))
+      }, [toast.title, titleDirty])
 
+      const flashTimer = useRef(null)
       const flash = (text, bad) => {
         setMsg({ text, bad })
-        window.setTimeout(() => setMsg(null), 2600)
+        // 连续提示时先清掉上一个定时器，否则旧定时器会把新消息提前抹掉
+        if (flashTimer.current) window.clearTimeout(flashTimer.current)
+        flashTimer.current = window.setTimeout(() => { flashTimer.current = null; setMsg(null) }, 2600)
       }
 
-      const apply = useCallback(async (patch, okText) => {
+      const commit = useCallback(async (patch, okText) => {
         setBusy(true)
         try {
           await save(patch)
           if (okText) flash(okText, false)
+          return true
         } catch (e) {
           flash('保存失败：' + ((e && e.message) || '请确认 DSH 仍在运行'), true)
+          return false
         } finally {
           setBusy(false)
         }
       }, [])
 
+      const preview = async (meta) => {
+        setPreviewing(meta.key)
+        try {
+          await playPreview(meta.key)
+          flash('正在试听：' + meta.label, false)
+        } catch (e) {
+          flash('试听失败：' + ((e && e.message) || '宿主未响应'), true)
+        } finally {
+          setPreviewing(null)
+        }
+      }
+
       const statusText = s.error ? ('连接异常：' + s.error)
         : s.loading ? '正在读取…'
-          : !s.enabledByPatch ? '总开关已关闭：不发声（改 bundle patch 的 enabled 后重新加载生效）'
-            : s.settings.muted ? '已静音：事件仍记录，但不发声'
-              : '正在监听'
+          : !settings.enabled ? '已停用：不发声、不弹通知'
+            : '正在监听'
+
+      /** 折叠分区。children 在调用处就已构造，内容始终渲染，只用 display 收起。 */
+      const sectionNode = (key, title, hint, open, onToggle, children) => h('section', { style: S.section, key },
+        h('button', {
+          type: 'button',
+          style: S.sectionHead,
+          'aria-expanded': open ? 'true' : 'false',
+          onClick: onToggle,
+        },
+        h('span', { style: S.sectionTitle }, title),
+        h('span', { style: S.sectionHint }, hint),
+        h('span', { style: S.chevron }, open ? '▾' : '▸')),
+        h('div', { style: open ? S.sectionBody : { ...S.sectionBody, display: 'none' } }, children),
+      )
+
+      /** 上传自定义音效：文件选择器拿到的 WAV 直接传给宿主，宿主只写固定目录与固定文件名。 */
+      const upload = async (e, meta) => {
+        const input = e && e.target
+        const file = input && input.files && input.files[0]
+        if (!file) return
+        if (file.size > 5 * 1024 * 1024) {
+          flash('音频文件超过 5 MB', true)
+          if (input) input.value = ''
+          return
+        }
+        setUploading(meta.key)
+        try {
+          const buffer = await file.arrayBuffer()
+          const r = await fetch(API + '/sound', {
+            method: 'POST',
+            headers: { 'content-type': 'application/octet-stream', 'x-chime-kind': meta.key },
+            body: buffer,
+          })
+          let j = null
+          try { j = await r.json() } catch { /* 非 JSON 响应按失败处理 */ }
+          if (!r.ok || !j || j.ok === false) throw new Error((j && j.error) || ('HTTP ' + r.status))
+          await refresh()
+          flash('已上传：' + meta.label + '（该行改用自定义）', false)
+        } catch (err) {
+          flash('上传失败：' + ((err && err.message) || '未知错误'), true)
+        } finally {
+          setUploading(null)
+          if (input) input.value = ''
+        }
+      }
+
+      const baseName = (p) => String(p || '').replace(/^.*[\\/]/, '')
+      const setLabelOf = (key) => {
+        const found = soundsets.find((set) => set.key === key)
+        return found ? found.label : key
+      }
+      /** 该事件最终生效的音色套（宿主已解析好；字段缺失时用全局值兜底）。 */
+      const effectiveSet = (meta) => meta.soundset || soundset
+
+      const kindDesc = (meta) => {
+        if (meta.soundExists === false) return '音效文件缺失：' + (meta.sound || '（未配置文件路径）')
+        if (effectiveSet(meta) === 'custom') {
+          const own = customSounds[meta.key]
+          return own ? ('自定义文件：' + baseName(own)) : '未上传，这类仍用内置音效'
+        }
+        return meta.body || ''
+      }
+
+      /** 每类事件的音色面板：常驻 DOM、只用 display 收起，渲染测试才覆盖得到。 */
+      const soundsetPanel = (meta) => h('div', {
+        key: meta.key + '-panel',
+        style: openPanel === meta.key ? S.panel : { ...S.panel, display: 'none' },
+      },
+      h('div', { style: S.panelTitle }, meta.label + ' 用哪套音色'),
+      h('div', { style: S.chips },
+        h('button', {
+          type: 'button',
+          key: 'inherit',
+          'aria-pressed': meta.soundsetPinned ? 'false' : 'true',
+          style: S.chip(!meta.soundsetPinned),
+          onClick: () => {
+            setOpenPanel(null)
+            commit({ perKindSoundset: { [meta.key]: null } }, meta.label + '：跟随全局（' + setLabelOf(soundset) + '）')
+          },
+        }, '跟随全局'),
+        soundsets.map((set) => h('button', {
+          type: 'button',
+          key: set.key,
+          'aria-pressed': (meta.soundsetPinned && meta.soundset === set.key) ? 'true' : 'false',
+          style: S.chip(meta.soundsetPinned && meta.soundset === set.key),
+          onClick: () => {
+            setOpenPanel(null)
+            commit({ perKindSoundset: { [meta.key]: set.key } }, meta.label + '：' + set.label)
+          },
+        }, set.label)),
+      ))
+
+      const kindRows = kindMeta.map((meta) => h('div', { key: meta.key, style: S.kindBlock },
+        rowNode({
+          title: meta.label,
+          desc: kindDesc(meta),
+          control: h('div', { style: S.inline },
+            h('button', {
+              type: 'button',
+              key: 'preview',
+              style: S.btn(previewing === meta.key || meta.soundExists === false),
+              disabled: previewing === meta.key || meta.soundExists === false,
+              onClick: () => preview(meta),
+            }, previewing === meta.key ? '播放中' : '试听'),
+            h('button', {
+              type: 'button',
+              key: 'soundset',
+              'aria-expanded': openPanel === meta.key ? 'true' : 'false',
+              style: S.pickerBtn(openPanel === meta.key),
+              onClick: () => setOpenPanel(openPanel === meta.key ? null : meta.key),
+            }, (meta.soundsetPinned ? setLabelOf(meta.soundset) : '跟随全局') + ' ▾'),
+            effectiveSet(meta) === 'custom'
+              ? h('label', { key: 'upload', style: S.fileBtn, title: '上传 WAV（不超过 5 MB）' },
+                uploading === meta.key ? '上传中' : (customSounds[meta.key] ? '重新上传' : '上传'),
+                h('input', {
+                  type: 'file',
+                  accept: '.wav,audio/wav',
+                  style: S.fileInput,
+                  onChange: (e) => upload(e, meta),
+                }))
+              : null,
+            toggleNode({
+              on: kindMap[meta.key] !== false,
+              label: meta.label + ' 发声',
+              onChange: (v) => commit({ kinds: { [meta.key]: v } }, (v ? '已开启：' : '已关闭：') + meta.label),
+            }),
+          ),
+        }),
+        soundsetPanel(meta),
+      ))
+
+      /** 音色套选择：选中即写设置，试听按钮随即用新音色。 */
+      const soundsetChips = h('div', { style: S.chips }, soundsets.map((set) => {
+        const on = soundset === set.key
+        return h('button', {
+          type: 'button',
+          key: set.key,
+          'aria-pressed': on ? 'true' : 'false',
+          style: S.chip(on),
+          onClick: () => commit({ soundset: set.key }, '音色已切到「' + set.label + '」'),
+        }, set.label)
+      }))
+
+      const toastChips = h('div', { style: S.chips }, kindMeta.map((meta) => {
+        const on = toastKinds.includes(meta.key)
+        return h('button', {
+          type: 'button',
+          key: meta.key,
+          'aria-pressed': on ? 'true' : 'false',
+          style: S.chip(on),
+          onClick: () => commit(
+            { toast: { kinds: on ? toastKinds.filter((k) => k !== meta.key) : [...toastKinds, meta.key] } },
+            '通知事件已更新',
+          ),
+        }, meta.label)
+      }))
 
       return h('div', { style: S.card },
         h('div', { style: S.head },
@@ -179,75 +462,163 @@ window.__ModuleLoader__.load({
           h('span', { style: S.status }, statusText),
         ),
         h('p', { style: S.desc },
-          '在回合完成、被中断、出错，或 Agent 提问时发声。下面的改动立即生效，不需要重启。'),
+          '回合完成、中断、出错或提问时发声，可另弹通知。改动立即生效。'),
 
-        h(Row, {
-          title: '静音',
-          desc: '打开后不再播放声音与通知，触发记录照常写入轨迹文件。适合临时不想被打扰时用。',
-          control: h(Toggle, {
-            on: s.settings.muted,
-            label: '静音',
-            onChange: (v) => apply({ muted: v }, v ? '已静音' : '已取消静音'),
-          }),
-        }),
-        h(Row, {
-          title: '子会话也提醒',
-          desc: '默认只在你自己的会话提醒；打开后 subagent 子会话结束也会发声。',
-          control: h(Toggle, {
-            on: s.settings.includeSubagents,
-            label: '子会话也提醒',
-            onChange: (v) => apply({ includeSubagents: v }),
-          }),
-        }),
-        h(Row, {
-          title: 'Agent 提问时弹系统通知',
-          desc: '声音之外再弹一个 Windows 通知，提醒你回来回答。触发工具：'
-            + (s.questionTools && s.questionTools.length ? s.questionTools.join(' / ') : 'ask_user_question'),
-          control: h(Toggle, {
-            on: s.settings.toastEnabled,
-            label: 'Agent 提问时弹系统通知',
-            onChange: (v) => apply({ toastEnabled: v }),
-          }),
-        }),
-        h(Row, {
-          title: '同类事件最小间隔',
-          desc: '去抖：同一类事件在这个间隔内只响一次，单位毫秒。',
-          control: h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-            h('input', {
-              style: S.input,
-              inputMode: 'numeric',
-              value: interval,
-              'aria-label': '同类事件最小间隔（毫秒）',
-              onChange: (e) => { setIntervalText(e.target.value); setDirty(true) },
+        sectionNode('sound', '声音', settings.enabled ? '四类事件各自开关' : '总开关已关', openSound, () => setOpenSound(!openSound), [
+          rowNode({
+            key: 'enabled',
+            title: '启用提示音',
+            desc: settings.enabled
+              ? '关闭后不发声也不弹通知，事件照常记录。'
+              : '已关闭' + (s.enabledByPatch === false ? '（patch 初值即 false）' : '') + '。',
+            control: toggleNode({
+              on: settings.enabled !== false,
+              label: '启用提示音',
+              onChange: (v) => commit({ enabled: v }, v ? '提示音已启用' : '提示音已停用'),
             }),
+          }),
+          rowNode({
+            key: 'soundset',
+            title: '音色',
+            desc: '全局默认；某类要单独配，点该行右侧的音色名。',
+            control: soundsetChips,
+          }),
+          ...kindRows,
+          rowNode({
+            key: 'interval',
+            title: '同类事件最小间隔',
+            desc: '同一类事件在该间隔内只响一次，单位毫秒。',
+            control: h('div', { style: S.inline },
+              h('input', {
+                style: S.input,
+                inputMode: 'numeric',
+                value: interval,
+                'aria-label': '同类事件最小间隔（毫秒）',
+                onChange: (e) => { setIntervalText(e.target.value); setIntervalDirty(true) },
+              }),
+              h('button', {
+                type: 'button',
+                style: S.btn(busy || !intervalDirty),
+                disabled: busy || !intervalDirty,
+                onClick: async () => {
+                  const n = Number(interval)
+                  if (!isFinite(n) || n < 0) { flash('间隔必须是非负数', true); return }
+                  if (n > 600000) { flash('上限 600000 毫秒（10 分钟）', true); return }
+                  const ok = await commit({ minIntervalMs: Math.floor(n) }, '间隔已保存')
+                  if (ok) setIntervalDirty(false)
+                },
+              }, '保存'),
+            ),
+          }),
+          rowNode({
+            key: 'subagents',
+            title: '子会话也提醒',
+            desc: '打开后 subagent 子会话结束也发声。',
+            control: toggleNode({
+              on: settings.includeSubagents === true,
+              label: '子会话也提醒',
+              onChange: (v) => commit({ includeSubagents: v }, v ? '子会话也会提醒' : '子会话不再提醒'),
+            }),
+          }),
+        ]),
+
+        sectionNode('toast', '通知', '系统 Toast，默认只对提问', openToast, () => setOpenToast(!openToast), [
+          rowNode({
+            key: 'toast-enabled',
+            title: '启用系统通知',
+            desc: '声音之外再弹系统通知，适合切到别的窗口。',
+            control: toggleNode({
+              on: toast.enabled === true,
+              label: '启用系统通知',
+              onChange: (v) => commit({ toast: { enabled: v } }, v ? '通知已启用' : '通知已关闭'),
+            }),
+          }),
+          rowNode({
+            key: 'toast-kinds',
+            title: '哪些事件弹通知',
+            desc: toastKinds.length === 0
+              ? '当前一个都没选：不会弹任何通知。'
+              : '已选 ' + toastKinds.length + ' 类；点选切换。',
+            control: toastChips,
+          }),
+          rowNode({
+            key: 'toast-title',
+            title: '通知标题前缀',
+            desc: '实际标题是「前缀 · 事件名」，最长 60 字符。',
+            control: h('div', { style: S.inline },
+              h('input', {
+                style: S.inputWide,
+                value: titleText,
+                maxLength: 60,
+                'aria-label': '通知标题前缀',
+                onChange: (e) => { setTitleText(e.target.value); setTitleDirty(true) },
+              }),
+              h('button', {
+                type: 'button',
+                style: S.btn(busy || !titleDirty),
+                disabled: busy || !titleDirty,
+                onClick: async () => {
+                  if (String(titleText).trim().length === 0) { flash('通知标题不能为空', true); return }
+                  const ok = await commit({ toast: { title: String(titleText).trim() } }, '标题已保存')
+                  if (ok) setTitleDirty(false)
+                },
+              }, '保存'),
+            ),
+          }),
+          rowNode({
+            key: 'toast-session',
+            title: '正文附带会话名',
+            desc: '正文后接「 · 会话标题」，多会话并行时分得清。',
+            control: toggleNode({
+              on: toast.includeSession === true,
+              label: '正文附带会话名',
+              onChange: (v) => commit({ toast: { includeSession: v } }),
+            }),
+          }),
+        ]),
+
+        sectionNode('advanced', '高级', '路径与调试信息', openAdvanced, () => setOpenAdvanced(!openAdvanced), [
+          h('div', { style: S.panel },
+            h('div', { style: S.kv },
+              h('span', null, '设置文件'),
+              h('span', { style: S.mono }, s.settingsFile || '~/.dsh/dsh-notify-chime.json'),
+              h('span', null, '音效目录'),
+              h('span', { style: S.mono }, (kindMeta[0] && kindMeta[0].sound) ? kindMeta[0].sound.replace(/[\\/][^\\/]+$/, '') : '—'),
+              h('span', null, '自定义目录'),
+              h('span', { style: S.mono }, s.soundsDir || '~/.dsh/dsh-notify-chime-sounds'),
+              h('span', null, '轨迹文件'),
+              h('span', { style: S.mono }, s.traceFile || '（未配置，patch 里设 traceFile 才写）'),
+              h('span', null, '提问工具'),
+              h('span', { style: S.mono }, (s.questionTools && s.questionTools.length) ? s.questionTools.join(' / ') : 'ask_user_question'),
+              h('span', null, 'Toast AppID'),
+              h('span', { style: S.mono }, s.toastAppId || 'com.deepseek.dsh'),
+              h('span', null, 'patch 初始值'),
+              h('span', { style: S.mono }, 'enabled=' + String(s.enabledByPatch) + '（改它需重启 DSH）'),
+            ),
+          ),
+          h('div', { style: S.inline },
             h('button', {
               type: 'button',
-              style: S.btn(busy || !dirty),
-              disabled: busy || !dirty,
+              style: S.btn(busy),
+              disabled: busy,
               onClick: async () => {
-                const n = Number(interval)
-                if (!isFinite(n) || n < 0) { flash('间隔必须是非负数', true); return }
-                if (n > 600000) { flash('上限 10 分钟（600000 毫秒）：再大会让提示音事实上再也响不了', true); return }
-                await apply({ minIntervalMs: Math.floor(n) }, '已保存')
-                setDirty(false)
+                if (!confirmReset) {
+                  setConfirmReset(true)
+                  flash('再点一次确认：会清掉本页所有自定义，回到 patch 初值', true)
+                  return
+                }
+                const ok = await commit({ reset: true }, '已恢复默认设置')
+                if (ok) setConfirmReset(false)
               },
-            }, '保存'),
+            }, confirmReset ? '确认恢复默认' : '恢复默认设置'),
           ),
-        }),
-
-        h('div', { style: S.panel },
-          h('div', { style: S.kv },
-            h('span', null, '轨迹文件'),
-            h('span', { style: S.mono }, s.traceFile || '（未配置）'),
-            h('span', null, '音效目录'),
-            h('span', { style: S.mono }, (s.sounds && s.sounds.finished) ? s.sounds.finished.replace(/[\\/][^\\/]+$/, '') : '—'),
-          ),
-        ),
+          h('p', { style: S.foot },
+            '音效文件、播放器、Toast AppID、提问工具在 cordis.patch.yml 里，改动需重启 DSH。'),
+        ]),
 
         msg ? h('div', { style: S.msg(msg.bad) }, msg.text) : null,
         h('p', { style: S.foot },
-          '总开关在 bundle 的 cordis.patch.yml 里（enabled），改它需要重启 DSH；'
-          + '本页的开关保存在 ~/.dsh/dsh-notify-chime.json，立即生效。'),
+          '设置存 ~/.dsh/dsh-notify-chime.json，保存即生效；patch 值仅在设置文件缺该项时生效。'),
       )
     }
 

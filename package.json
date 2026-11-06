@@ -1,8 +1,8 @@
 {
   "name": "dsh-notify-chime",
-  "version": "1.1.1",
+  "version": "1.4.0",
   "type": "module",
-  "description": "工作完成、中断、出错或 Agent 提问时播放提示音，提问时可另弹 Windows 系统通知。",
+  "description": "回合完成、中断、出错或 Agent 提问时发声，可另弹系统通知；六套音色，支持自定义 WAV。",
   "main": "lib/host.js",
   "exports": {
     ".": "./lib/host.js",
@@ -15,6 +15,7 @@
     "lib",
     "client.js",
     "assets",
+    "tools/make_sounds.py",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -36,7 +37,7 @@
     }
   },
   "license": "MIT",
-  "author": "dixie_2003 (https://github.com/dixieWithHeart)",
+  "author": "dixie_with_heart (https://github.com/dixieWithHeart)",
   "keywords": [
     "dsh",
     "dsh-plugin",

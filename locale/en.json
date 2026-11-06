@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Notify Chime",
-    "description": "Plays a sound when a turn finishes, is interrupted, errors, or the agent asks a question, with an optional system toast."
+    "description": "Plays a sound on turn finish, interruption, error, or agent question; optional system toast."
   }
 }
