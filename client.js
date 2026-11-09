@@ -26,6 +26,271 @@ window.__ModuleLoader__.load({
     const POLL_MS = 3000
     const LOG = '[dsh-notify-chime]'
 
+    // 界面文案：走宿主 locale 服务（ctx.locale），随界面语言切换即时更新。
+    // locale/*.json 只放插件清单的 meta，不承载界面文案——界面字典必须内联在 client 里。
+    // 事件名（kind.*）与音色名（soundset.*）也用字典：宿主元数据里的 label 只有中文，仅作未知键兜底。
+    const NS = 'notifyChime'
+    const DICTS = {
+      zh: {
+        nav: '提示音',
+        title: '提示音',
+        desc: '回合完成、中断、出错或提问时发声，可另弹通知。改动立即生效。',
+        'status.error': '连接异常：{error}',
+        'status.reading': '正在读取…',
+        'status.disabled': '已停用：不发声、不弹通知',
+        'status.listening': '正在监听',
+        'err.host': '无法连接宿主路由',
+        saveFailed: '保存失败：{error}',
+        stillRunning: '请确认 DSH 仍在运行',
+        hostNoResponse: '宿主未响应',
+        unknownError: '未知错误',
+        previewing: '正在试听：{kind}',
+        previewFailed: '试听失败：{error}',
+        fileTooBig: '音频文件超过 5 MB',
+        uploaded: '已上传：{kind}（该行改用自定义）',
+        uploadFailed: '上传失败：{error}',
+        soundMissing: '音效文件缺失：{path}',
+        noPathConfigured: '（未配置文件路径）',
+        customFile: '自定义文件：{name}',
+        notUploaded: '未上传，这类仍用内置音效',
+        panelTitle: '{kind} 用哪套音色',
+        followGlobal: '跟随全局',
+        followedGlobal: '{kind}：跟随全局（{soundset}）',
+        kindPinned: '{kind}：{soundset}',
+        playing: '播放中',
+        preview: '试听',
+        uploadTitle: '上传音频（不超过 5 MB）',
+        uploading: '上传中',
+        reupload: '重新上传',
+        upload: '上传',
+        kindToggle: '{kind} 发声',
+        kindOn: '已开启：{kind}',
+        kindOff: '已关闭：{kind}',
+        soundsetSwitched: '音色已切到「{soundset}」',
+        toastKindsUpdated: '通知事件已更新',
+        'section.sound': '声音',
+        'section.soundHintOn': '四类事件各自开关',
+        'section.soundHintOff': '总开关已关',
+        'row.enabled': '启用提示音',
+        'row.enabledOn': '关闭后不发声也不弹通知，事件照常记录。',
+        'row.enabledOff': '已关闭。',
+        'row.enabledOffPatch': '已关闭（patch 初值即 false）。',
+        chimesEnabled: '提示音已启用',
+        chimesDisabled: '提示音已停用',
+        'row.soundset': '音色',
+        'row.soundsetDesc': '全局默认；某类要单独配，点该行右侧的音色名。',
+        'row.interval': '同类事件最小间隔',
+        'row.intervalDesc': '同一类事件在该间隔内只响一次，单位毫秒。',
+        intervalAria: '同类事件最小间隔（毫秒）',
+        intervalNegative: '间隔必须是非负数',
+        intervalTooBig: '上限 600000 毫秒（10 分钟）',
+        intervalSaved: '间隔已保存',
+        save: '保存',
+        'row.quiet': '正在看的会话完成时不响',
+        'row.quietDesc': '只对「工作完成」生效；审批、提问、出错照常响。默认关闭。',
+        quietOn: '正在看的会话完成时不再响',
+        quietOff: '完成时照常响',
+        'row.sub': '子会话也提醒',
+        'row.subDesc': '打开后 subagent 子会话结束也发声。',
+        subOn: '子会话也会提醒',
+        subOff: '子会话不再提醒',
+        'section.toast': '通知',
+        'section.toastHint': '系统 Toast，默认只对提问',
+        'row.toastEnabled': '启用系统通知',
+        'row.toastEnabledDesc': '声音之外再弹系统通知，适合切到别的窗口。',
+        toastOn: '通知已启用',
+        toastOff: '通知已关闭',
+        'row.toastKinds': '哪些事件弹通知',
+        toastKindsNone: '当前一个都没选：不会弹任何通知。',
+        toastKindsSome: '已选 {count} 类；点选切换。',
+        'row.toastTitle': '通知标题前缀',
+        'row.toastTitleDesc': '实际标题是「前缀 · 事件名」，最长 60 字符。',
+        toastTitleAria: '通知标题前缀',
+        toastTitleEmpty: '通知标题不能为空',
+        toastTitleSaved: '标题已保存',
+        'row.toastSession': '正文附带会话名',
+        'row.toastSessionDesc': '正文后接「 · 会话标题」，多会话并行时分得清。',
+        'section.advanced': '高级',
+        'section.advancedHint': '路径与调试信息',
+        'kv.settingsFile': '设置文件',
+        'kv.soundDir': '音效目录',
+        'kv.customDir': '自定义目录',
+        'kv.traceFile': '轨迹文件',
+        'kv.traceNone': '（未配置，patch 里设 traceFile 才写）',
+        'kv.questionTools': '提问工具',
+        'kv.appId': 'Toast AppID',
+        'kv.patchInit': 'patch 初始值',
+        'kv.patchInitValue': 'enabled={value}（改它需重启 DSH）',
+        confirmHint: '再点一次确认：会清掉本页所有自定义，回到 patch 初值',
+        resetConfirm: '确认恢复默认',
+        reset: '恢复默认设置',
+        resetDone: '已恢复默认设置',
+        'foot.advanced': '音效文件、播放器、Toast AppID、提问工具在 cordis.patch.yml 里，改动需重启 DSH。',
+        'foot.main': '设置存 ~/.dsh/dsh-notify-chime.json，保存即生效；patch 值仅在设置文件缺该项时生效。',
+        'kind.finished': '工作完成',
+        'kind.interrupted': '工作中断',
+        'kind.error': '工作出错',
+        'kind.question': 'Agent 提问',
+        'kind.approval': '等待审批',
+        'kind.plan-review': '计划评审',
+        'kind.goal-blocked': '目标受阻',
+        'kind.job-failed': '后台任务失败',
+        'kind.finished.body': '本轮工作已结束',
+        'kind.interrupted.body': '本轮工作已被中断',
+        'kind.error.body': '本轮工作因错误结束',
+        'kind.question.body': 'Agent 正在等待你的回答',
+        'kind.approval.body': '有操作正在等你批准',
+        'kind.plan-review.body': 'Agent 提交了计划，等你评审',
+        'kind.goal-blocked.body': '当前目标被阻塞，需要你介入',
+        'kind.job-failed.body': '一个后台任务执行失败',
+        'soundset.default': '默认',
+        'soundset.soft': '柔和',
+        'soundset.chime': '钟声',
+        'soundset.retro': '复古',
+        'soundset.digital': '电子',
+        'soundset.wood': '木质',
+        'soundset.custom': '自定义'
+      },
+      en: {
+        nav: 'Notification Chime',
+        title: 'Notification Chime',
+        desc: 'Chimes when a turn finishes, is interrupted, fails, or asks a question; can also show a toast. Changes apply immediately.',
+        'status.error': 'Connection error: {error}',
+        'status.reading': 'Reading…',
+        'status.disabled': 'Off: no sound, no toast',
+        'status.listening': 'Listening',
+        'err.host': 'Cannot reach the host route',
+        saveFailed: 'Save failed: {error}',
+        stillRunning: 'Make sure DSH is still running',
+        hostNoResponse: 'The host did not respond',
+        unknownError: 'Unknown error',
+        previewing: 'Previewing: {kind}',
+        previewFailed: 'Preview failed: {error}',
+        fileTooBig: 'Audio file exceeds 5 MB',
+        uploaded: 'Uploaded: {kind} (this row now uses the custom sound)',
+        uploadFailed: 'Upload failed: {error}',
+        soundMissing: 'Sound file missing: {path}',
+        noPathConfigured: '(no file path configured)',
+        customFile: 'Custom file: {name}',
+        notUploaded: 'Not uploaded; this kind still uses the built-in sound',
+        panelTitle: 'Which soundset for {kind}',
+        followGlobal: 'Follow global',
+        followedGlobal: '{kind}: follows global ({soundset})',
+        kindPinned: '{kind}: {soundset}',
+        playing: 'Playing',
+        preview: 'Preview',
+        uploadTitle: 'Upload audio (max 5 MB)',
+        uploading: 'Uploading',
+        reupload: 'Replace',
+        upload: 'Upload',
+        kindToggle: 'Chime for {kind}',
+        kindOn: 'On: {kind}',
+        kindOff: 'Off: {kind}',
+        soundsetSwitched: 'Soundset switched to {soundset}',
+        toastKindsUpdated: 'Toast events updated',
+        'section.sound': 'Sound',
+        'section.soundHintOn': 'Per-event switches',
+        'section.soundHintOff': 'Master switch off',
+        'row.enabled': 'Enable chimes',
+        'row.enabledOn': 'When off, nothing plays and no toast shows; events are still recorded.',
+        'row.enabledOff': 'Off.',
+        'row.enabledOffPatch': 'Off (the patch sets it to false).',
+        chimesEnabled: 'Chimes enabled',
+        chimesDisabled: 'Chimes disabled',
+        'row.soundset': 'Soundset',
+        'row.soundsetDesc': 'Global default. To configure one kind, click its soundset name on the right.',
+        'row.interval': 'Minimum interval per event kind',
+        'row.intervalDesc': 'The same kind chimes once within this interval, in milliseconds.',
+        intervalAria: 'Minimum interval per event kind (ms)',
+        intervalNegative: 'The interval must be a non-negative number',
+        intervalTooBig: 'Maximum is 600000 ms (10 minutes)',
+        intervalSaved: 'Interval saved',
+        save: 'Save',
+        'row.quiet': 'Stay silent when the session you are viewing finishes',
+        'row.quietDesc': 'Applies only to turn finished; approvals, questions and errors still chime. Off by default.',
+        quietOn: 'Stays silent when the viewed session finishes',
+        quietOff: 'Chimes as usual on finish',
+        'row.sub': 'Also chime for sub-sessions',
+        'row.subDesc': 'When on, subagent sessions chime too.',
+        subOn: 'Sub-sessions chime too',
+        subOff: 'Sub-sessions stay silent',
+        'section.toast': 'Notifications',
+        'section.toastHint': 'System toast; questions only by default',
+        'row.toastEnabled': 'Enable system notifications',
+        'row.toastEnabledDesc': 'Shows a system notification besides the chime, for when you switch to another window.',
+        toastOn: 'Notifications enabled',
+        toastOff: 'Notifications disabled',
+        'row.toastKinds': 'Which events show a toast',
+        toastKindsNone: 'None selected: no toast will show.',
+        toastKindsSome: '{count} selected; click to toggle.',
+        'row.toastTitle': 'Toast title prefix',
+        'row.toastTitleDesc': 'The actual title reads "prefix · event"; up to 60 characters.',
+        toastTitleAria: 'Toast title prefix',
+        toastTitleEmpty: 'The toast title cannot be empty',
+        toastTitleSaved: 'Title saved',
+        'row.toastSession': 'Include the session name in the body',
+        'row.toastSessionDesc': 'Appends " · session title" so parallel sessions stay distinguishable.',
+        'section.advanced': 'Advanced',
+        'section.advancedHint': 'Paths and debug info',
+        'kv.settingsFile': 'Settings file',
+        'kv.soundDir': 'Sound directory',
+        'kv.customDir': 'Custom sounds directory',
+        'kv.traceFile': 'Trace file',
+        'kv.traceNone': '(not configured; set traceFile in the patch to write one)',
+        'kv.questionTools': 'Question tool',
+        'kv.appId': 'Toast AppID',
+        'kv.patchInit': 'Patch initial value',
+        'kv.patchInitValue': 'enabled={value} (changing it requires a DSH restart)',
+        confirmHint: 'Click again to confirm: this clears every customization on this page and restores patch defaults',
+        resetConfirm: 'Confirm reset',
+        reset: 'Restore defaults',
+        resetDone: 'Defaults restored',
+        'foot.advanced': 'Sound files, player, Toast AppID and question tools live in cordis.patch.yml; changes need a DSH restart.',
+        'foot.main': 'Settings live in ~/.dsh/dsh-notify-chime.json and apply on save; patch values only apply when the settings file lacks that field.',
+        'kind.finished': 'Turn finished',
+        'kind.interrupted': 'Turn interrupted',
+        'kind.error': 'Turn failed',
+        'kind.question': 'Agent question',
+        'kind.approval': 'Waiting for approval',
+        'kind.plan-review': 'Plan review',
+        'kind.goal-blocked': 'Goal blocked',
+        'kind.job-failed': 'Job failed',
+        'kind.finished.body': 'The turn has finished',
+        'kind.interrupted.body': 'The turn was interrupted',
+        'kind.error.body': 'The turn ended with an error',
+        'kind.question.body': 'The agent is waiting for your answer',
+        'kind.approval.body': 'An action needs your approval',
+        'kind.plan-review.body': 'The agent submitted a plan for review',
+        'kind.goal-blocked.body': 'The current goal is blocked and needs you',
+        'kind.job-failed.body': 'A background job failed',
+        'soundset.default': 'Default',
+        'soundset.soft': 'Soft',
+        'soundset.chime': 'Chime',
+        'soundset.retro': 'Retro',
+        'soundset.digital': 'Digital',
+        'soundset.wood': 'Wood',
+        'soundset.custom': 'Custom'
+      }
+    }
+
+    /** 占位符替换，语义与宿主 locale 的 translate 一致（`{name}` → params.name）。 */
+    function fill (template, params) {
+      if (!params) return template
+      return template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m))
+    }
+
+    // apply 前只有兜底值（内置中文）；宿主 locale 可用时替换为 bind(NS)。
+    let t = (key, params) => fill(DICTS.zh[key] === undefined ? key : DICTS.zh[key], params)
+
+    /** 字典优先、宿主元数据兜底：宿主新增的事件名/音色名不会因字典没跟上而显示成键名。 */
+    function tr (key, fallback) {
+      const v = t(key)
+      return v === key ? fallback : v
+    }
+    const kindLabel = (meta) => tr('kind.' + meta.key, meta.label || meta.key)
+    const kindBody = (meta) => tr('kind.' + meta.key + '.body', meta.body || '')
+    const soundsetLabel = (set) => tr('soundset.' + set.key, set.label || set.key)
+
     /** 宿主没返回元数据时的兜底（字段缺失也要能渲染）。 */
     const KIND_FALLBACK = [
       { key: 'finished', label: '工作完成', sound: null, soundExists: true },
@@ -103,7 +368,7 @@ window.__ModuleLoader__.load({
         const j = await r.json()
         state = { ...state, loading: false, error: null, ...j }
       } catch (e) {
-        state = { ...state, loading: false, error: (e && e.message) || '无法连接宿主路由' }
+        state = { ...state, loading: false, error: (e && e.message) || t('err.host') }
       }
       emit()
     }
@@ -300,7 +565,7 @@ window.__ModuleLoader__.load({
           if (okText) flash(okText, false)
           return true
         } catch (e) {
-          flash('保存失败：' + ((e && e.message) || '请确认 DSH 仍在运行'), true)
+          flash(t('saveFailed', { error: (e && e.message) || t('stillRunning') }), true)
           return false
         } finally {
           setBusy(false)
@@ -311,18 +576,18 @@ window.__ModuleLoader__.load({
         setPreviewing(meta.key)
         try {
           await playPreview(meta.key)
-          flash('正在试听：' + meta.label, false)
+          flash(t('previewing', { kind: kindLabel(meta) }), false)
         } catch (e) {
-          flash('试听失败：' + ((e && e.message) || '宿主未响应'), true)
+          flash(t('previewFailed', { error: (e && e.message) || t('hostNoResponse') }), true)
         } finally {
           setPreviewing(null)
         }
       }
 
-      const statusText = s.error ? ('连接异常：' + s.error)
-        : s.loading ? '正在读取…'
-          : !settings.enabled ? '已停用：不发声、不弹通知'
-            : '正在监听'
+      const statusText = s.error ? t('status.error', { error: s.error })
+        : s.loading ? t('status.reading')
+          : !settings.enabled ? t('status.disabled')
+            : t('status.listening')
 
       /** 折叠分区。children 在调用处就已构造，内容始终渲染，只用 display 收起。 */
       const sectionNode = (key, title, hint, open, onToggle, children) => h('section', { style: S.section, key },
@@ -344,7 +609,7 @@ window.__ModuleLoader__.load({
         const file = input && input.files && input.files[0]
         if (!file) return
         if (file.size > 5 * 1024 * 1024) {
-          flash('音频文件超过 5 MB', true)
+          flash(t('fileTooBig'), true)
           if (input) input.value = ''
           return
         }
@@ -360,9 +625,9 @@ window.__ModuleLoader__.load({
           try { j = await r.json() } catch { /* 非 JSON 响应按失败处理 */ }
           if (!r.ok || !j || j.ok === false) throw new Error((j && j.error) || ('HTTP ' + r.status))
           await refresh()
-          flash('已上传：' + meta.label + '（该行改用自定义）', false)
+          flash(t('uploaded', { kind: kindLabel(meta) }), false)
         } catch (err) {
-          flash('上传失败：' + ((err && err.message) || '未知错误'), true)
+          flash(t('uploadFailed', { error: (err && err.message) || t('unknownError') }), true)
         } finally {
           setUploading(null)
           if (input) input.value = ''
@@ -370,20 +635,17 @@ window.__ModuleLoader__.load({
       }
 
       const baseName = (p) => String(p || '').replace(/^.*[\\/]/, '')
-      const setLabelOf = (key) => {
-        const found = soundsets.find((set) => set.key === key)
-        return found ? found.label : key
-      }
+      const setLabelOf = (key) => soundsetLabel({ key, label: (soundsets.find((set) => set.key === key) || {}).label })
       /** 该事件最终生效的音色套（宿主已解析好；字段缺失时用全局值兜底）。 */
       const effectiveSet = (meta) => meta.soundset || soundset
 
       const kindDesc = (meta) => {
-        if (meta.soundExists === false) return '音效文件缺失：' + (meta.sound || '（未配置文件路径）')
+        if (meta.soundExists === false) return t('soundMissing', { path: meta.sound || t('noPathConfigured') })
         if (effectiveSet(meta) === 'custom') {
           const own = customSounds[meta.key]
-          return own ? ('自定义文件：' + baseName(own)) : '未上传，这类仍用内置音效'
+          return own ? t('customFile', { name: baseName(own) }) : t('notUploaded')
         }
-        return meta.body || ''
+        return kindBody(meta)
       }
 
       /** 每类事件的音色面板：常驻 DOM、只用 display 收起，渲染测试才覆盖得到。 */
@@ -391,7 +653,7 @@ window.__ModuleLoader__.load({
         key: meta.key + '-panel',
         style: openPanel === meta.key ? S.panel : { ...S.panel, display: 'none' },
       },
-      h('div', { style: S.panelTitle }, meta.label + ' 用哪套音色'),
+      h('div', { style: S.panelTitle }, t('panelTitle', { kind: kindLabel(meta) })),
       h('div', { style: S.chips },
         h('button', {
           type: 'button',
@@ -400,9 +662,9 @@ window.__ModuleLoader__.load({
           style: S.chip(!meta.soundsetPinned),
           onClick: () => {
             setOpenPanel(null)
-            commit({ perKindSoundset: { [meta.key]: null } }, meta.label + '：跟随全局（' + setLabelOf(soundset) + '）')
+            commit({ perKindSoundset: { [meta.key]: null } }, t('followedGlobal', { kind: kindLabel(meta), soundset: setLabelOf(soundset) }))
           },
-        }, '跟随全局'),
+        }, t('followGlobal')),
         soundsets.map((set) => h('button', {
           type: 'button',
           key: set.key,
@@ -410,14 +672,14 @@ window.__ModuleLoader__.load({
           style: S.chip(meta.soundsetPinned && meta.soundset === set.key),
           onClick: () => {
             setOpenPanel(null)
-            commit({ perKindSoundset: { [meta.key]: set.key } }, meta.label + '：' + set.label)
+            commit({ perKindSoundset: { [meta.key]: set.key } }, t('kindPinned', { kind: kindLabel(meta), soundset: soundsetLabel(set) }))
           },
-        }, set.label)),
+        }, soundsetLabel(set))),
       ))
 
       const kindRows = kindMeta.map((meta) => h('div', { key: meta.key, style: S.kindBlock },
         rowNode({
-          title: meta.label,
+          title: kindLabel(meta),
           desc: kindDesc(meta),
           control: h('div', { style: S.inline },
             h('button', {
@@ -426,17 +688,17 @@ window.__ModuleLoader__.load({
               style: S.btn(previewing === meta.key || meta.soundExists === false),
               disabled: previewing === meta.key || meta.soundExists === false,
               onClick: () => preview(meta),
-            }, previewing === meta.key ? '播放中' : '试听'),
+            }, previewing === meta.key ? t('playing') : t('preview')),
             h('button', {
               type: 'button',
               key: 'soundset',
               'aria-expanded': openPanel === meta.key ? 'true' : 'false',
               style: S.pickerBtn(openPanel === meta.key),
               onClick: () => setOpenPanel(openPanel === meta.key ? null : meta.key),
-            }, (meta.soundsetPinned ? setLabelOf(meta.soundset) : '跟随全局') + ' ▾'),
+            }, (meta.soundsetPinned ? setLabelOf(meta.soundset) : t('followGlobal')) + ' ▾'),
             effectiveSet(meta) === 'custom'
-              ? h('label', { key: 'upload', style: S.fileBtn, title: '上传 WAV（不超过 5 MB）' },
-                uploading === meta.key ? '上传中' : (customSounds[meta.key] ? '重新上传' : '上传'),
+              ? h('label', { key: 'upload', style: S.fileBtn, title: t('uploadTitle') },
+                uploading === meta.key ? t('uploading') : (customSounds[meta.key] ? t('reupload') : t('upload')),
                 h('input', {
                   type: 'file',
                   accept: '.wav,.mp3,.m4a,.aac',
@@ -446,8 +708,8 @@ window.__ModuleLoader__.load({
               : null,
             toggleNode({
               on: kindMap[meta.key] !== false,
-              label: meta.label + ' 发声',
-              onChange: (v) => commit({ kinds: { [meta.key]: v } }, (v ? '已开启：' : '已关闭：') + meta.label),
+              label: t('kindToggle', { kind: kindLabel(meta) }),
+              onChange: (v) => commit({ kinds: { [meta.key]: v } }, t(v ? 'kindOn' : 'kindOff', { kind: kindLabel(meta) })),
             }),
           ),
         }),
@@ -462,8 +724,8 @@ window.__ModuleLoader__.load({
           key: set.key,
           'aria-pressed': on ? 'true' : 'false',
           style: S.chip(on),
-          onClick: () => commit({ soundset: set.key }, '音色已切到「' + set.label + '」'),
-        }, set.label)
+          onClick: () => commit({ soundset: set.key }, t('soundsetSwitched', { soundset: soundsetLabel(set) })),
+        }, soundsetLabel(set))
       }))
 
       const toastChips = h('div', { style: S.chipsRow }, kindMeta.map((meta) => {
@@ -475,50 +737,49 @@ window.__ModuleLoader__.load({
           style: S.chip(on),
           onClick: () => commit(
             { toast: { kinds: on ? toastKinds.filter((k) => k !== meta.key) : [...toastKinds, meta.key] } },
-            '通知事件已更新',
+            t('toastKindsUpdated'),
           ),
-        }, meta.label)
+        }, kindLabel(meta))
       }))
 
       return h('div', { style: S.card },
         h('div', { style: S.head },
-          h('h3', { style: S.title }, '提示音'),
+          h('h3', { style: S.title }, t('title')),
           s.version ? h('span', { style: S.badge }, 'v' + s.version) : null,
           h('span', { style: S.status }, statusText),
         ),
-        h('p', { style: S.desc },
-          '回合完成、中断、出错或提问时发声，可另弹通知。改动立即生效。'),
+        h('p', { style: S.desc }, t('desc')),
 
-        sectionNode('sound', '声音', settings.enabled ? '四类事件各自开关' : '总开关已关', openSound, () => setOpenSound(!openSound), [
+        sectionNode('sound', t('section.sound'), settings.enabled ? t('section.soundHintOn') : t('section.soundHintOff'), openSound, () => setOpenSound(!openSound), [
           rowNode({
             key: 'enabled',
-            title: '启用提示音',
+            title: t('row.enabled'),
             desc: settings.enabled
-              ? '关闭后不发声也不弹通知，事件照常记录。'
-              : '已关闭' + (s.enabledByPatch === false ? '（patch 初值即 false）' : '') + '。',
+              ? t('row.enabledOn')
+              : t(s.enabledByPatch === false ? 'row.enabledOffPatch' : 'row.enabledOff'),
             control: toggleNode({
               on: settings.enabled !== false,
-              label: '启用提示音',
-              onChange: (v) => commit({ enabled: v }, v ? '提示音已启用' : '提示音已停用'),
+              label: t('row.enabled'),
+              onChange: (v) => commit({ enabled: v }, v ? t('chimesEnabled') : t('chimesDisabled')),
             }),
           }),
           rowNode({
             key: 'soundset',
-            title: '音色',
-            desc: '全局默认；某类要单独配，点该行右侧的音色名。',
+            title: t('row.soundset'),
+            desc: t('row.soundsetDesc'),
             control: soundsetChips,
           }),
           ...kindRows,
           rowNode({
             key: 'interval',
-            title: '同类事件最小间隔',
-            desc: '同一类事件在该间隔内只响一次，单位毫秒。',
+            title: t('row.interval'),
+            desc: t('row.intervalDesc'),
             control: h('div', { style: S.inline },
               h('input', {
                 style: S.input,
                 inputMode: 'numeric',
                 value: interval,
-                'aria-label': '同类事件最小间隔（毫秒）',
+                'aria-label': t('intervalAria'),
                 onChange: (e) => { setIntervalText(e.target.value); setIntervalDirty(true) },
               }),
               h('button', {
@@ -527,65 +788,65 @@ window.__ModuleLoader__.load({
                 disabled: busy || !intervalDirty,
                 onClick: async () => {
                   const n = Number(interval)
-                  if (!isFinite(n) || n < 0) { flash('间隔必须是非负数', true); return }
-                  if (n > 600000) { flash('上限 600000 毫秒（10 分钟）', true); return }
-                  const ok = await commit({ minIntervalMs: Math.floor(n) }, '间隔已保存')
+                  if (!isFinite(n) || n < 0) { flash(t('intervalNegative'), true); return }
+                  if (n > 600000) { flash(t('intervalTooBig'), true); return }
+                  const ok = await commit({ minIntervalMs: Math.floor(n) }, t('intervalSaved'))
                   if (ok) setIntervalDirty(false)
                 },
-              }, '保存'),
+              }, t('save')),
             ),
           }),
           rowNode({
             key: 'quietCurrent',
-            title: '正在看的会话完成时不响',
-            desc: '只对「工作完成」生效；审批、提问、出错照常响。默认关闭。',
+            title: t('row.quiet'),
+            desc: t('row.quietDesc'),
             control: toggleNode({
               on: settings.quietCurrent === true,
-              label: '正在看的会话完成时不响',
-              onChange: (v) => commit({ quietCurrent: v }, v ? '正在看的会话完成时不再响' : '完成时照常响'),
+              label: t('row.quiet'),
+              onChange: (v) => commit({ quietCurrent: v }, v ? t('quietOn') : t('quietOff')),
             }),
           }),
           rowNode({
             key: 'subagents',
-            title: '子会话也提醒',
-            desc: '打开后 subagent 子会话结束也发声。',
+            title: t('row.sub'),
+            desc: t('row.subDesc'),
             control: toggleNode({
               on: settings.includeSubagents === true,
-              label: '子会话也提醒',
-              onChange: (v) => commit({ includeSubagents: v }, v ? '子会话也会提醒' : '子会话不再提醒'),
+              label: t('row.sub'),
+              onChange: (v) => commit({ includeSubagents: v }, v ? t('subOn') : t('subOff')),
             }),
           }),
         ]),
 
-        sectionNode('toast', '通知', '系统 Toast，默认只对提问', openToast, () => setOpenToast(!openToast), [
+        sectionNode('toast', t('section.toast'), t('section.toastHint'), openToast, () => setOpenToast(!openToast), [
           rowNode({
             key: 'toast-enabled',
-            title: '启用系统通知',
-            desc: '声音之外再弹系统通知，适合切到别的窗口。',
+            title: t('row.toastEnabled'),
+            desc: t('row.toastEnabledDesc'),
             control: toggleNode({
               on: toast.enabled === true,
-              label: '启用系统通知',
-              onChange: (v) => commit({ toast: { enabled: v } }, v ? '通知已启用' : '通知已关闭'),
+              label: t('row.toastEnabled'),
+              onChange: (v) => commit({ toast: { enabled: v } }, v ? t('toastOn') : t('toastOff')),
             }),
           }),
           rowNode({
             key: 'toast-kinds',
-            title: '哪些事件弹通知',
+            title: t('row.toastKinds'),
             desc: toastKinds.length === 0
-              ? '当前一个都没选：不会弹任何通知。'
-              : '已选 ' + toastKinds.length + ' 类；点选切换。',
+              ? t('toastKindsNone')
+              : t('toastKindsSome', { count: toastKinds.length }),
             control: toastChips,
           }),
           rowNode({
             key: 'toast-title',
-            title: '通知标题前缀',
-            desc: '实际标题是「前缀 · 事件名」，最长 60 字符。',
+            title: t('row.toastTitle'),
+            desc: t('row.toastTitleDesc'),
             control: h('div', { style: S.inline },
               h('input', {
                 style: S.inputWide,
                 value: titleText,
                 maxLength: 60,
-                'aria-label': '通知标题前缀',
+                'aria-label': t('toastTitleAria'),
                 onChange: (e) => { setTitleText(e.target.value); setTitleDirty(true) },
               }),
               h('button', {
@@ -593,42 +854,42 @@ window.__ModuleLoader__.load({
                 style: S.btn(busy || !titleDirty),
                 disabled: busy || !titleDirty,
                 onClick: async () => {
-                  if (String(titleText).trim().length === 0) { flash('通知标题不能为空', true); return }
-                  const ok = await commit({ toast: { title: String(titleText).trim() } }, '标题已保存')
+                  if (String(titleText).trim().length === 0) { flash(t('toastTitleEmpty'), true); return }
+                  const ok = await commit({ toast: { title: String(titleText).trim() } }, t('toastTitleSaved'))
                   if (ok) setTitleDirty(false)
                 },
-              }, '保存'),
+              }, t('save')),
             ),
           }),
           rowNode({
             key: 'toast-session',
-            title: '正文附带会话名',
-            desc: '正文后接「 · 会话标题」，多会话并行时分得清。',
+            title: t('row.toastSession'),
+            desc: t('row.toastSessionDesc'),
             control: toggleNode({
               on: toast.includeSession === true,
-              label: '正文附带会话名',
+              label: t('row.toastSession'),
               onChange: (v) => commit({ toast: { includeSession: v } }),
             }),
           }),
         ]),
 
-        sectionNode('advanced', '高级', '路径与调试信息', openAdvanced, () => setOpenAdvanced(!openAdvanced), [
+        sectionNode('advanced', t('section.advanced'), t('section.advancedHint'), openAdvanced, () => setOpenAdvanced(!openAdvanced), [
           h('div', { style: S.panel },
             h('div', { style: S.kv },
-              h('span', null, '设置文件'),
+              h('span', null, t('kv.settingsFile')),
               h('span', { style: S.mono }, s.settingsFile || '~/.dsh/dsh-notify-chime.json'),
-              h('span', null, '音效目录'),
+              h('span', null, t('kv.soundDir')),
               h('span', { style: S.mono }, (kindMeta[0] && kindMeta[0].sound) ? kindMeta[0].sound.replace(/[\\/][^\\/]+$/, '') : '—'),
-              h('span', null, '自定义目录'),
+              h('span', null, t('kv.customDir')),
               h('span', { style: S.mono }, s.soundsDir || '~/.dsh/dsh-notify-chime-sounds'),
-              h('span', null, '轨迹文件'),
-              h('span', { style: S.mono }, s.traceFile || '（未配置，patch 里设 traceFile 才写）'),
-              h('span', null, '提问工具'),
+              h('span', null, t('kv.traceFile')),
+              h('span', { style: S.mono }, s.traceFile || t('kv.traceNone')),
+              h('span', null, t('kv.questionTools')),
               h('span', { style: S.mono }, (s.questionTools && s.questionTools.length) ? s.questionTools.join(' / ') : 'ask_user_question'),
-              h('span', null, 'Toast AppID'),
+              h('span', null, t('kv.appId')),
               h('span', { style: S.mono }, s.toastAppId || 'com.deepseek.dsh'),
-              h('span', null, 'patch 初始值'),
-              h('span', { style: S.mono }, 'enabled=' + String(s.enabledByPatch) + '（改它需重启 DSH）'),
+              h('span', null, t('kv.patchInit')),
+              h('span', { style: S.mono }, t('kv.patchInitValue', { value: String(s.enabledByPatch) })),
             ),
           ),
           h('div', { style: S.inline },
@@ -639,21 +900,19 @@ window.__ModuleLoader__.load({
               onClick: async () => {
                 if (!confirmReset) {
                   setConfirmReset(true)
-                  flash('再点一次确认：会清掉本页所有自定义，回到 patch 初值', true)
+                  flash(t('confirmHint'), true)
                   return
                 }
-                const ok = await commit({ reset: true }, '已恢复默认设置')
+                const ok = await commit({ reset: true }, t('resetDone'))
                 if (ok) setConfirmReset(false)
               },
-            }, confirmReset ? '确认恢复默认' : '恢复默认设置'),
+            }, confirmReset ? t('resetConfirm') : t('reset')),
           ),
-          h('p', { style: S.foot },
-            '音效文件、播放器、Toast AppID、提问工具在 cordis.patch.yml 里，改动需重启 DSH。'),
+          h('p', { style: S.foot }, t('foot.advanced')),
         ]),
 
         msg ? h('div', { style: S.msg(msg.bad) }, msg.text) : null,
-        h('p', { style: S.foot },
-          '设置存 ~/.dsh/dsh-notify-chime.json，保存即生效；patch 值仅在设置文件缺该项时生效。'),
+        h('p', { style: S.foot }, t('foot.main')),
       )
     }
 
@@ -674,10 +933,19 @@ window.__ModuleLoader__.load({
       }
     }
 
-    const inject = ['slots']
+    const inject = ['slots', 'locale']
 
     function apply (ctx) {
       pluginCtx = ctx
+      // 界面文案接入宿主 locale：注册字典后 t 指向 bind(NS)，切换语言即时生效。
+      // 精简组合或测试替身可能没有 locale 服务——判存在后退回内置中文，不让整块 UI 崩掉。
+      if (ctx.locale && typeof ctx.locale.register === 'function' && typeof ctx.locale.bind === 'function') {
+        ctx.effect(() => ctx.locale.register(NS, DICTS), 'notify-chime-dicts')
+        t = ctx.locale.bind(NS)
+      } else {
+        console.warn(LOG, 'locale 服务不可用：界面文案固定中文')
+      }
+
       ctx.effect(() => {
         refresh()
         const timer = setInterval(() => { if (!document.hidden) refresh() }, POLL_MS)
@@ -693,7 +961,7 @@ window.__ModuleLoader__.load({
         () => contribute(
           ctx,
           'settings.section',
-          { name: 'settings.section', id: 'notify-sound', order: 210, label: '提示音' },
+          { name: 'settings.section', id: 'notify-sound', order: 210, locale: NS, label: () => t('nav') },
           SettingsCard,
           'settings.section',
         ),
