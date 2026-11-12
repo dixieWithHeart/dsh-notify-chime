@@ -411,24 +411,183 @@ window.__ModuleLoader__.load({
       return snap
     }
 
+    // @ui-kit v1.3.0  共享 UI 基座（源：plugins/_shared/ui-kit.js；改源后重新复制本段）
+    // ═════════════════════════════ [C] 颜色 token ═════════════════════════
     const C = {
       border: 'var(--dsw-alias-border-subtle, rgba(130,130,140,0.28))',
       text: 'var(--dsw-alias-text-primary, inherit)',
       dim: 'var(--dsw-alias-text-secondary, rgba(140,140,150,1))',
       accent: 'var(--dsw-alias-accent, #4f7cff)',
       surface: 'var(--dsw-alias-surface-raised, rgba(130,130,140,0.06))',
+      ok: 'var(--dsw-alias-success, #2f9e6b)',
+      warn: 'var(--dsw-alias-warning, #c8862a)',
       danger: 'var(--dsw-alias-danger, #e5534b)',
       radius: 'var(--dsw-radius-lg, 12px)',
       radiusSm: 'var(--dsw-radius-sm, 8px)',
+      mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     }
 
-    const S = {
+    // ═════════════════════════ [S_BASE] 通用样式 ═════════════════════════
+    // 插件用 `{ ...S_BASE, ...特有键 }` 组装自己的 S，特有键不要回填本文件。
+    const S_BASE = {
       card: { border: '1px solid ' + C.border, borderRadius: C.radius, padding: '16px 18px', display: 'grid', gap: '14px', color: C.text },
       head: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' },
       title: { fontSize: '15px', fontWeight: 600, margin: 0 },
       badge: { fontSize: '12px', color: C.dim, border: '1px solid ' + C.border, borderRadius: '999px', padding: '1px 8px' },
       status: { marginLeft: 'auto', fontSize: '12px', color: C.dim },
       desc: { margin: 0, fontSize: '13px', lineHeight: 1.6, color: C.dim },
+      /* 行布局自适应：空间不够时控件整体换到下一行，而不是把标题挤成一字一列 */
+      row: { display: 'flex', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' },
+      rowText: { display: 'grid', gap: '2px', flex: '1 1 200px', minWidth: '180px' },
+      rowTitle: { fontSize: '13px', fontWeight: 550 },
+      rowDesc: { fontSize: '12px', color: C.dim, lineHeight: 1.5 },
+      field: { display: 'grid', gap: '4px' },
+      label: { fontSize: '12px', color: C.dim },
+      hint: { fontSize: '12px', color: C.dim, lineHeight: 1.5 },
+      inline: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 1 auto', flexWrap: 'wrap', justifyContent: 'flex-end' },
+      toggle: (on) => ({
+        width: '38px', height: '22px', borderRadius: '999px', border: '1px solid ' + C.border,
+        background: on ? C.accent : 'rgba(130,130,140,0.25)', position: 'relative', cursor: 'pointer',
+        flex: 'none', marginTop: '2px', transition: 'background 160ms ease',
+      }),
+      knob: (on) => ({
+        position: 'absolute', top: '2px', left: on ? '18px' : '2px', width: '16px', height: '16px',
+        borderRadius: '50%', background: '#fff', transition: 'left 160ms ease',
+      }),
+      chip: (on) => ({
+        padding: '3px 10px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
+        border: '1px solid ' + (on ? C.accent : C.border),
+        background: on ? C.accent : 'transparent',
+        color: on ? '#fff' : C.dim,
+      }),
+      chips: { display: 'flex', gap: '6px', flexWrap: 'wrap', minWidth: 0 },
+      panel: { background: C.surface, borderRadius: C.radiusSm, padding: '12px 14px', display: 'grid', gap: '10px' },
+      input: {
+        width: '110px', padding: '5px 8px', fontSize: '13px', textAlign: 'right',
+        border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
+      },
+      textarea: {
+        fontFamily: C.mono, fontSize: '12.5px', lineHeight: 1.6, padding: '8px 10px',
+        resize: 'vertical', border: '1px solid ' + C.border, borderRadius: '6px',
+        background: 'transparent', color: C.text, minHeight: '56px', width: '100%', boxSizing: 'border-box',
+      },
+      /* 文本输入：与 textarea 同族的全宽、等宽、左对齐；行内需要伸缩时在使用处加 flex */
+      textInput: {
+        width: '100%', boxSizing: 'border-box',
+        fontFamily: C.mono, fontSize: '12.5px', lineHeight: 1.6, padding: '7px 9px',
+        border: '1px solid ' + C.border, borderRadius: '6px',
+        background: 'transparent', color: C.text,
+      },
+      btn: (disabled) => ({
+        padding: '5px 12px', fontSize: '13px', borderRadius: C.radiusSm,
+        border: '1px solid ' + C.border, background: 'transparent', color: C.text,
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flex: 'none',
+      }),
+      link: { fontSize: '13px', padding: '5px 12px', borderRadius: C.radiusSm, border: '1px solid ' + C.border, background: 'transparent', color: C.text, cursor: 'pointer' },
+      line: {
+        fontFamily: C.mono, fontSize: '12.5px', lineHeight: 1.6, wordBreak: 'break-all',
+        background: 'rgba(130,130,140,0.12)', borderRadius: '6px', padding: '8px 10px', color: C.text,
+      },
+      empty: { fontSize: '12.5px', color: C.dim, fontStyle: 'italic' },
+      msg: (bad) => ({ fontSize: '12px', color: bad ? C.danger : C.dim }),
+      foot: { fontSize: '12px', color: C.dim, lineHeight: 1.6, margin: 0 },
+      mono: { fontFamily: C.mono, wordBreak: 'break-all' },
+      statItem: { display: 'grid', gap: '2px' },
+      statValue: { fontSize: '18px', fontWeight: 600 },
+      statKey: { fontSize: '12px', color: C.dim },
+      range: { width: '100%', accentColor: C.accent, cursor: 'pointer' },
+      sliderHead: { display: 'flex', alignItems: 'baseline', gap: '8px', justifyContent: 'space-between' },
+      sliderValue: { fontSize: '13px', fontWeight: 600, fontFamily: C.mono },
+    }
+
+    // ═════════════════════════ [组件] 通用控件 ═════════════════════════
+    /** 开关按钮。 */
+    function Toggle ({ on, label, onChange }) {
+      return h('button', {
+        type: 'button',
+        'aria-label': label,
+        'aria-pressed': on ? 'true' : 'false',
+        style: S.toggle(on),
+        onClick: () => onChange(!on),
+      }, h('span', { style: S.knob(on) }))
+    }
+
+    /** 一行设置：左标题与说明，右控件。 */
+    function Row ({ title, desc, control }) {
+      return h('div', { style: S.row },
+        h('div', { style: S.rowText },
+          h('div', { style: S.rowTitle }, title),
+          desc ? h('div', { style: S.rowDesc }, desc) : null,
+        ),
+        control,
+      )
+    }
+
+    /** 一行文本：有值显示内容，无值显示占位说明。 */
+    function Line ({ text, placeholder }) {
+      return text
+        ? h('div', { style: S.line }, text)
+        : h('div', { style: S.empty }, placeholder)
+    }
+
+    /** 标签 + 值（值默认等宽）。 */
+    function Field ({ label, value, mono }) {
+      return h('div', { style: S.field },
+        h('span', { style: S.label }, label),
+        h('span', { style: mono === false ? { fontSize: '12.5px' } : { fontFamily: C.mono, fontSize: '12.5px' } }, value),
+      )
+    }
+
+    /** 百分比滑条。valueText 传当前值的可读形式（如 "30%"），不传则只显示标签。 */
+    function Slider ({ label, value, min, max, step, hint, valueText, disabled, onChange }) {
+      return h('div', { style: S.field },
+        h('div', { style: S.sliderHead },
+          h('span', { style: S.rowTitle }, label),
+          valueText ? h('span', { style: S.sliderValue }, valueText) : null,
+        ),
+        h('input', {
+          type: 'range',
+          min,
+          max,
+          step,
+          value: Number(value) || 0,
+          style: S.range,
+          'aria-label': label,
+          disabled,
+          onChange: (e) => onChange(Number(e.target.value)),
+        }),
+        hint ? h('span', { style: S.hint }, hint) : null,
+      )
+    }
+
+    /** 数据卡片：一个数值 + 一句说明。 */
+    function Stat ({ value, label }) {
+      return h('div', { style: S.statItem },
+        h('div', { style: S.statValue }, value),
+        h('div', { style: S.statKey }, label),
+      )
+    }
+
+    /** 互斥选项组（药丸按钮）。options 为 `[[value, label], ...]`。 */
+    function ChipGroup ({ value, options, disabled, onChange }) {
+      return h('div', { style: S.chips },
+        options.map(([key, label]) => h('button', {
+          key,
+          type: 'button',
+          style: S.chip(value === key),
+          'aria-pressed': value === key ? 'true' : 'false',
+          disabled,
+          onClick: () => onChange(key, label),
+        }, label))
+      )
+    }
+
+
+    /** 本插件特有样式，叠加在共享基座之上。 */
+    const S = {
+      ...S_BASE,
+      // 改造前是 8px，覆盖基座的 10px，保持零视觉差异
+      panel: { ...S_BASE.panel, gap: '8px' },
       section: { border: '1px solid ' + C.border, borderRadius: C.radiusSm, overflow: 'hidden' },
       sectionHead: {
         width: '100%', display: 'flex', alignItems: 'baseline', gap: '8px', padding: '9px 12px',
@@ -439,36 +598,10 @@ window.__ModuleLoader__.load({
       sectionHint: { fontSize: '12px', color: C.dim, flex: 1, minWidth: 0 },
       chevron: { fontSize: '11px', color: C.dim, marginLeft: 'auto', flex: 'none' },
       sectionBody: { padding: '12px 14px', display: 'grid', gap: '12px' },
-      // 行布局自适应：空间不够时控件整体换到下一行，而不是把标题挤成一字一列
-      row: { display: 'flex', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' },
-      rowText: { display: 'grid', gap: '2px', flex: '1 1 200px', minWidth: '180px' },
-      rowTitle: { fontSize: '13px', fontWeight: 550 },
-      rowDesc: { fontSize: '12px', color: C.dim, lineHeight: 1.5 },
-      toggle: (on) => ({
-        width: '38px', height: '22px', borderRadius: '999px', border: '1px solid ' + C.border,
-        background: on ? C.accent : 'rgba(130,130,140,0.25)', position: 'relative', cursor: 'pointer',
-        flex: 'none', marginTop: '2px', transition: 'background 160ms ease',
-      }),
-      knob: (on) => ({
-        position: 'absolute', top: '2px', left: on ? '18px' : '2px', width: '16px', height: '16px',
-        borderRadius: '50%', background: '#fff', transition: 'left 160ms ease',
-      }),
-      inline: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 1 auto', flexWrap: 'wrap', justifyContent: 'flex-end' },
-      input: {
-        width: '110px', padding: '5px 8px', fontSize: '13px', textAlign: 'right',
-        border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
-      },
       inputWide: {
         flex: '1 1 160px', minWidth: '160px', padding: '5px 8px', fontSize: '13px',
         border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
       },
-      btn: (disabled) => ({
-        padding: '5px 12px', fontSize: '13px', borderRadius: C.radiusSm,
-        border: '1px solid ' + C.border, background: 'transparent', color: C.text,
-        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flex: 'none',
-      }),
-      chips: { display: 'flex', gap: '6px', flexWrap: 'wrap', minWidth: 0 },
-      /** 行内 chips：允许收缩换行，右对齐 */
       chipsRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', flex: '0 1 auto', minWidth: 0, maxWidth: '100%', justifyContent: 'flex-end' },
       fileBtn: {
         padding: '5px 10px', fontSize: '12px', borderRadius: C.radiusSm, border: '1px dashed ' + C.border,
@@ -483,37 +616,11 @@ window.__ModuleLoader__.load({
       }),
       kindBlock: { display: 'grid', gap: '6px' },
       panelTitle: { fontSize: '12px', color: C.dim },
-      chip: (on) => ({
-        padding: '3px 10px', fontSize: '12px', borderRadius: '999px', cursor: 'pointer',
-        border: '1px solid ' + (on ? C.accent : C.border),
-        background: on ? C.accent : 'transparent',
-        color: on ? '#fff' : C.dim,
-      }),
-      panel: { background: C.surface, borderRadius: C.radiusSm, padding: '12px 14px', display: 'grid', gap: '8px' },
       kv: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: '12px', color: C.dim },
-      mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', wordBreak: 'break-all' },
-      msg: (bad) => ({ fontSize: '12px', color: bad ? C.danger : C.dim }),
-      foot: { fontSize: '12px', color: C.dim, lineHeight: 1.6, margin: 0 },
       warn: { fontSize: '12px', color: C.danger },
     }
 
     /** 开关按钮（普通函数，非组件：保证渲染测试能执行到 S.xxx）。 */
-    const toggleNode = ({ on, onChange, label }) => h('button', {
-      type: 'button',
-      'aria-label': label,
-      'aria-pressed': on ? 'true' : 'false',
-      style: S.toggle(on),
-      onClick: () => onChange(!on),
-    }, h('span', { style: S.knob(on) }))
-
-    /** 一行设置：左标题与说明，右控件。 */
-    const rowNode = ({ title, desc, control }) => h('div', { style: S.row },
-      h('div', { style: S.rowText },
-        h('div', { style: S.rowTitle }, title),
-        desc ? h('div', { style: S.rowDesc }, desc) : null,
-      ),
-      control,
-    )
 
     function SettingsCard () {
       const s = useStore()
@@ -678,7 +785,7 @@ window.__ModuleLoader__.load({
       ))
 
       const kindRows = kindMeta.map((meta) => h('div', { key: meta.key, style: S.kindBlock },
-        rowNode({
+        h(Row, {
           title: kindLabel(meta),
           desc: kindDesc(meta),
           control: h('div', { style: S.inline },
@@ -706,7 +813,7 @@ window.__ModuleLoader__.load({
                   onChange: (e) => upload(e, meta),
                 }))
               : null,
-            toggleNode({
+            h(Toggle, {
               on: kindMap[meta.key] !== false,
               label: t('kindToggle', { kind: kindLabel(meta) }),
               onChange: (v) => commit({ kinds: { [meta.key]: v } }, t(v ? 'kindOn' : 'kindOff', { kind: kindLabel(meta) })),
@@ -751,26 +858,26 @@ window.__ModuleLoader__.load({
         h('p', { style: S.desc }, t('desc')),
 
         sectionNode('sound', t('section.sound'), settings.enabled ? t('section.soundHintOn') : t('section.soundHintOff'), openSound, () => setOpenSound(!openSound), [
-          rowNode({
+          h(Row, {
             key: 'enabled',
             title: t('row.enabled'),
             desc: settings.enabled
               ? t('row.enabledOn')
               : t(s.enabledByPatch === false ? 'row.enabledOffPatch' : 'row.enabledOff'),
-            control: toggleNode({
+            control: h(Toggle, {
               on: settings.enabled !== false,
               label: t('row.enabled'),
               onChange: (v) => commit({ enabled: v }, v ? t('chimesEnabled') : t('chimesDisabled')),
             }),
           }),
-          rowNode({
+          h(Row, {
             key: 'soundset',
             title: t('row.soundset'),
             desc: t('row.soundsetDesc'),
             control: soundsetChips,
           }),
           ...kindRows,
-          rowNode({
+          h(Row, {
             key: 'interval',
             title: t('row.interval'),
             desc: t('row.intervalDesc'),
@@ -796,21 +903,21 @@ window.__ModuleLoader__.load({
               }, t('save')),
             ),
           }),
-          rowNode({
+          h(Row, {
             key: 'quietCurrent',
             title: t('row.quiet'),
             desc: t('row.quietDesc'),
-            control: toggleNode({
+            control: h(Toggle, {
               on: settings.quietCurrent === true,
               label: t('row.quiet'),
               onChange: (v) => commit({ quietCurrent: v }, v ? t('quietOn') : t('quietOff')),
             }),
           }),
-          rowNode({
+          h(Row, {
             key: 'subagents',
             title: t('row.sub'),
             desc: t('row.subDesc'),
-            control: toggleNode({
+            control: h(Toggle, {
               on: settings.includeSubagents === true,
               label: t('row.sub'),
               onChange: (v) => commit({ includeSubagents: v }, v ? t('subOn') : t('subOff')),
@@ -819,17 +926,17 @@ window.__ModuleLoader__.load({
         ]),
 
         sectionNode('toast', t('section.toast'), t('section.toastHint'), openToast, () => setOpenToast(!openToast), [
-          rowNode({
+          h(Row, {
             key: 'toast-enabled',
             title: t('row.toastEnabled'),
             desc: t('row.toastEnabledDesc'),
-            control: toggleNode({
+            control: h(Toggle, {
               on: toast.enabled === true,
               label: t('row.toastEnabled'),
               onChange: (v) => commit({ toast: { enabled: v } }, v ? t('toastOn') : t('toastOff')),
             }),
           }),
-          rowNode({
+          h(Row, {
             key: 'toast-kinds',
             title: t('row.toastKinds'),
             desc: toastKinds.length === 0
@@ -837,7 +944,7 @@ window.__ModuleLoader__.load({
               : t('toastKindsSome', { count: toastKinds.length }),
             control: toastChips,
           }),
-          rowNode({
+          h(Row, {
             key: 'toast-title',
             title: t('row.toastTitle'),
             desc: t('row.toastTitleDesc'),
@@ -861,11 +968,11 @@ window.__ModuleLoader__.load({
               }, t('save')),
             ),
           }),
-          rowNode({
+          h(Row, {
             key: 'toast-session',
             title: t('row.toastSession'),
             desc: t('row.toastSessionDesc'),
-            control: toggleNode({
+            control: h(Toggle, {
               on: toast.includeSession === true,
               label: t('row.toastSession'),
               onChange: (v) => commit({ toast: { includeSession: v } }),
