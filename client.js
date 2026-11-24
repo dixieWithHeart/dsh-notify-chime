@@ -411,7 +411,7 @@ window.__ModuleLoader__.load({
       return snap
     }
 
-    // @ui-kit v1.3.0  共享 UI 基座（源：plugins/_shared/ui-kit.js；改源后重新复制本段）
+    // @ui-kit v1.4.3  共享 UI 基座（源：plugins/_shared/ui-kit.js；改源后重新复制本段）
     // ═════════════════════════════ [C] 颜色 token ═════════════════════════
     const C = {
       border: 'var(--dsw-alias-border-subtle, rgba(130,130,140,0.28))',
@@ -500,6 +500,42 @@ window.__ModuleLoader__.load({
       sliderValue: { fontSize: '13px', fontWeight: 600, fontFamily: C.mono },
     }
 
+    // ═════════════════════════ [P] 页面骨架样式 ═════════════════════════
+    // 页面骨架（Page / Card / Section / Footer）用 P，不并入插件的 S。
+    // 插件无法通过覆盖 S 改变页面层级，六个插件的设置页因此保持同构。
+    const P = {
+      page: { display: 'grid', gap: '14px', color: C.text },
+      head: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
+      title: { fontSize: '16px', fontWeight: 600, margin: 0, lineHeight: 1.3 },
+      meta: { fontSize: '12px', color: C.dim },
+      headRight: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' },
+      badge: { fontSize: '12px', color: C.dim, border: '1px solid ' + C.border, borderRadius: '999px', padding: '1px 8px' },
+      card: {
+        border: '1px solid ' + C.border, borderRadius: C.radius, padding: '16px 18px',
+        display: 'grid', gap: '12px',
+      },
+      cardHead: { display: 'grid', gap: '3px' },
+      cardTitleRow: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' },
+      cardTitle: { fontSize: '15px', fontWeight: 600, margin: 0 },
+      cardAction: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
+      cardDesc: { margin: 0, fontSize: '12px', lineHeight: 1.6, color: C.dim },
+      section: { borderTop: '1px solid ' + C.border, paddingTop: '10px', display: 'grid', gap: '10px' },
+      sectionHead: {
+        display: 'flex', alignItems: 'baseline', gap: '8px', width: '100%',
+        background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+        color: C.text, textAlign: 'left',
+      },
+      sectionTitle: { fontSize: '13px', fontWeight: 600 },
+      sectionHint: { fontSize: '12px', color: C.dim, flex: '1 1 auto', minWidth: 0 },
+      sectionChevron: { fontSize: '12px', color: C.dim, flex: 'none' },
+      sectionBody: { display: 'grid', gap: '10px' },
+      footer: { fontSize: '12px', color: C.dim, lineHeight: 1.6, margin: 0 },
+      ok: { fontSize: '12px', color: C.ok },
+      bad: { fontSize: '12px', color: C.danger },
+      note: { fontSize: '12px', color: C.dim },
+      empty: { fontSize: '12.5px', color: C.dim, fontStyle: 'italic' },
+    }
+
     // ═════════════════════════ [组件] 通用控件 ═════════════════════════
     /** 开关按钮。 */
     function Toggle ({ on, label, onChange }) {
@@ -568,6 +604,78 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 设置页骨架：页头（标题 / 版本 / 自定义徽章 / 状态 / 开关）+ 可选说明 + 内容 + 脚注。 */
+    function Page ({ title, version, badge, status, toggle, desc, children, footer }) {
+      return h('div', { style: P.page },
+        h('div', { style: P.head },
+          h('h3', { style: P.title }, title),
+          version ? h('span', { style: P.badge }, 'v' + version) : null,
+          badge ? h('span', { style: P.badge }, badge) : null,
+          h('div', { style: P.headRight },
+            status ? h('span', { style: P.meta }, status) : null,
+            toggle || null,
+          ),
+        ),
+        desc ? h('p', { style: P.meta }, desc) : null,
+        children,
+        footer ? h('p', { style: P.footer }, footer) : null,
+      )
+    }
+
+    /** 内容卡片：标题 + 可选说明 + 标题行右侧操作 + 内容。 */
+    function Card ({ title, desc, status, action, children }) {
+      return h('section', { style: P.card },
+        (title || desc || status || action) ? h('div', { style: P.cardHead },
+          (title || status || action) ? h('div', { style: P.cardTitleRow },
+            title ? h('h4', { style: P.cardTitle }, title) : null,
+            status ? h('span', { style: P.meta }, status) : null,
+            action ? h('span', { style: P.cardAction }, action) : null,
+          ) : null,
+          desc ? h('p', { style: P.cardDesc }, desc) : null,
+        ) : null,
+        children,
+      )
+    }
+
+    /** 可折叠分组：标题行 + 折叠内容（收起时保留 DOM，只用 display 隐藏）。 */
+    function Section ({ title, hint, open, onToggle, children }) {
+      return h('section', { style: P.section },
+        h('button', {
+          type: 'button',
+          style: P.sectionHead,
+          'aria-expanded': open ? 'true' : 'false',
+          onClick: onToggle,
+        },
+          h('span', { style: P.sectionTitle }, title),
+          hint ? h('span', { style: P.sectionHint }, hint) : null,
+          h('span', { style: P.sectionChevron }, open ? '▾' : '▸'),
+        ),
+        h('div', { style: open ? P.sectionBody : { ...P.sectionBody, display: 'none' } }, children),
+      )
+    }
+
+    /** 纵向堆叠。 */
+    function Stack ({ gap, children }) {
+      return h('div', { style: { display: 'grid', gap: gap || '10px' } }, children)
+    }
+
+    /** 横向排列，空间不足时换行。 */
+    function Inline ({ gap, children }) {
+      return h('div', { style: { display: 'flex', alignItems: 'center', gap: gap || '8px', flexWrap: 'wrap' } }, children)
+    }
+
+    /** 保存状态行：saving / saved / error；text 为空时不渲染。 */
+    function StatusLine ({ state, text }) {
+      if (!text) return null
+      const style = state === 'error' ? P.bad : state === 'saved' ? P.ok : P.note
+      return h('div', { style, role: state === 'error' ? 'alert' : 'status' }, text)
+    }
+
+    /** 脚注：存储路径、数据来源等。 */
+    function Footer ({ children }) {
+      return h('p', { style: P.footer }, children)
+    }
+
     /** 互斥选项组（药丸按钮）。options 为 `[[value, label], ...]`。 */
     function ChipGroup ({ value, options, disabled, onChange }) {
       return h('div', { style: S.chips },
@@ -588,16 +696,7 @@ window.__ModuleLoader__.load({
       ...S_BASE,
       // 改造前是 8px，覆盖基座的 10px，保持零视觉差异
       panel: { ...S_BASE.panel, gap: '8px' },
-      section: { border: '1px solid ' + C.border, borderRadius: C.radiusSm, overflow: 'hidden' },
-      sectionHead: {
-        width: '100%', display: 'flex', alignItems: 'baseline', gap: '8px', padding: '9px 12px',
-        background: C.surface, border: 'none', color: C.text, cursor: 'pointer', textAlign: 'left',
-        font: 'inherit',
-      },
-      sectionTitle: { fontSize: '13px', fontWeight: 600 },
-      sectionHint: { fontSize: '12px', color: C.dim, flex: 1, minWidth: 0 },
-      chevron: { fontSize: '11px', color: C.dim, marginLeft: 'auto', flex: 'none' },
-      sectionBody: { padding: '12px 14px', display: 'grid', gap: '12px' },
+      // 折叠分组已交给基座 Section，页面骨架交给 Page
       inputWide: {
         flex: '1 1 160px', minWidth: '160px', padding: '5px 8px', fontSize: '13px',
         border: '1px solid ' + C.border, borderRadius: C.radiusSm, background: 'transparent', color: C.text,
@@ -622,6 +721,19 @@ window.__ModuleLoader__.load({
 
     /** 开关按钮（普通函数，非组件：保证渲染测试能执行到 S.xxx）。 */
 
+    /** 设置页导航图标：铃铛（跟随主题色）。 */
+    function SettingsIcon ({ size }) {
+      const px = Number(size) || 18
+      return h('svg', {
+        width: px, height: px, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      },
+        h('path', { d: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9' }),
+        h('path', { d: 'M13.7 21a2 2 0 0 1-3.4 0' }),
+      )
+    }
+
     function SettingsCard () {
       const s = useStore()
       const [busy, setBusy] = useState(false)
@@ -630,9 +742,6 @@ window.__ModuleLoader__.load({
       const [uploading, setUploading] = useState(null)
       const [openPanel, setOpenPanel] = useState(null)
       const [msg, setMsg] = useState(null)
-      const [openSound, setOpenSound] = useState(true)
-      const [openToast, setOpenToast] = useState(true)
-      const [openAdvanced, setOpenAdvanced] = useState(false)
       const [confirmReset, setConfirmReset] = useState(false)
 
       // 兜底：宿主载荷缺字段时也不能让整页空白（踩坑第 15 条）
@@ -696,19 +805,8 @@ window.__ModuleLoader__.load({
           : !settings.enabled ? t('status.disabled')
             : t('status.listening')
 
-      /** 折叠分区。children 在调用处就已构造，内容始终渲染，只用 display 收起。 */
-      const sectionNode = (key, title, hint, open, onToggle, children) => h('section', { style: S.section, key },
-        h('button', {
-          type: 'button',
-          style: S.sectionHead,
-          'aria-expanded': open ? 'true' : 'false',
-          onClick: onToggle,
-        },
-        h('span', { style: S.sectionTitle }, title),
-        h('span', { style: S.sectionHint }, hint),
-        h('span', { style: S.chevron }, open ? '▾' : '▸')),
-        h('div', { style: open ? S.sectionBody : { ...S.sectionBody, display: 'none' } }, children),
-      )
+      /** 分组卡片：内容常驻（2026-11-24 弃用折叠，统一普通卡片）。 */
+      const sectionNode = (key, title, hint, children) => h(Card, { key, title, desc: hint, children })
 
       /** 上传自定义音效：文件选择器拿到的 WAV 直接传给宿主，宿主只写固定目录与固定文件名。 */
       const upload = async (e, meta) => {
@@ -849,15 +947,15 @@ window.__ModuleLoader__.load({
         }, kindLabel(meta))
       }))
 
-      return h('div', { style: S.card },
-        h('div', { style: S.head },
-          h('h3', { style: S.title }, t('title')),
-          s.version ? h('span', { style: S.badge }, 'v' + s.version) : null,
-          h('span', { style: S.status }, statusText),
-        ),
-        h('p', { style: S.desc }, t('desc')),
+      return h(Page, {
+        title: t('title'),
+        version: s.version,
+        status: statusText,
+        desc: t('desc'),
+        footer: t('foot.main'),
+        children: [
 
-        sectionNode('sound', t('section.sound'), settings.enabled ? t('section.soundHintOn') : t('section.soundHintOff'), openSound, () => setOpenSound(!openSound), [
+        sectionNode('sound', t('section.sound'), settings.enabled ? t('section.soundHintOn') : t('section.soundHintOff'), [
           h(Row, {
             key: 'enabled',
             title: t('row.enabled'),
@@ -925,7 +1023,7 @@ window.__ModuleLoader__.load({
           }),
         ]),
 
-        sectionNode('toast', t('section.toast'), t('section.toastHint'), openToast, () => setOpenToast(!openToast), [
+        sectionNode('toast', t('section.toast'), t('section.toastHint'), [
           h(Row, {
             key: 'toast-enabled',
             title: t('row.toastEnabled'),
@@ -980,7 +1078,7 @@ window.__ModuleLoader__.load({
           }),
         ]),
 
-        sectionNode('advanced', t('section.advanced'), t('section.advancedHint'), openAdvanced, () => setOpenAdvanced(!openAdvanced), [
+        sectionNode('advanced', t('section.advanced'), t('section.advancedHint'), [
           h('div', { style: S.panel },
             h('div', { style: S.kv },
               h('span', null, t('kv.settingsFile')),
@@ -1018,9 +1116,9 @@ window.__ModuleLoader__.load({
           h('p', { style: S.foot }, t('foot.advanced')),
         ]),
 
-        msg ? h('div', { style: S.msg(msg.bad) }, msg.text) : null,
-        h('p', { style: S.foot }, t('foot.main')),
-      )
+        msg ? h(StatusLine, { state: msg.bad ? 'error' : 'saved', text: msg.text }) : null,
+        ],
+      })
     }
 
     function contribute (ctx, key, options, Component, what) {
@@ -1073,6 +1171,17 @@ window.__ModuleLoader__.load({
           'settings.section',
         ),
         'notify-sound-settings-section',
+      )
+
+      ctx.effect(
+        () => contribute(
+          ctx,
+          'settings.section.icon',
+          { name: 'settings.section.icon', id: 'notify-sound' },
+          SettingsIcon,
+          'settings.section.icon',
+        ),
+        'notify-sound-settings-icon',
       )
     }
 

@@ -256,7 +256,7 @@ const m4aUpload = await call('/api/dsh-notify-chime/sound', 'POST', m4aBytes, { 
 check('M4A 上传返回 200', m4aUpload.status === 200, JSON.stringify(m4aUpload.body))
 check('M4A 存成 .m4a', String(m4aUpload.body?.sound).endsWith('.m4a'), String(m4aUpload.body?.sound))
 
-const wavThenMp3 = await call('/api/dsh-notify-chime/sound', 'POST', wavBytes, { 'x-chime-kind': 'interrupted' })
+await call('/api/dsh-notify-chime/sound', 'POST', wavBytes, { 'x-chime-kind': 'interrupted' })
 const beforeSwitch = existsSync(join(soundsPath, 'interrupted.wav'))
 await call('/api/dsh-notify-chime/sound', 'POST', mp3Bytes, { 'x-chime-kind': 'interrupted' })
 check('换格式后旧的 .wav 被清掉', beforeSwitch && !existsSync(join(soundsPath, 'interrupted.wav')), String(beforeSwitch))
